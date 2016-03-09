@@ -22,6 +22,9 @@ def hdot(x, A):
 
 
 def safe_exp(x):
+    """
+    Returns a tuple (exp(x-xmax), xmax).
+    """
     xmax = x.max()
     return np.exp(x - xmax), xmax
 

@@ -34,9 +34,10 @@ class LFit(object):
         self.time = time() - t0
 
     def _do_fitting(self):
-        self._integral = np.dot(self._F, self.sample.pe) / self.npts
+        self._integral = np.dot(self._F, self.sample.pn) / self.npts
         self._integral *= np.exp(self.sample.logscale)
-        self._fit = self.family.from_integral(self._integral)
+        wq = self.family.from_integral(self._integral)
+        self._fit = wq / self.sample.kernel
 
     def _get_integral(self):
         return self._integral
@@ -46,7 +47,7 @@ class LFit(object):
         Estimate variance on integral estimate
         """
         n = self._integral.size
-        var = np.dot(self._F * (self.sample.pe ** 2), self._F.T) / self.npts \
+        var = np.dot(self._F * (self.sample.pn ** 2), self._F.T) / self.npts \
             - np.dot(self._integral.reshape(n, 1), self._integral.reshape(1, n))
         var /= self.npts
         return var
@@ -55,16 +56,13 @@ class LFit(object):
         return self._fit
 
     def _get_theta(self):
-        theta = self._fit.theta.copy()
-        theta -= self.sample.kernel.theta
-        return theta
+        return self._fit.theta
 
     def _get_sensitivity_matrix(self):
-        # compute the fitted importance weights
-        log_qe = np.dot(self._F.T, self._fit.theta) +\
-            - self.sample.kernel.log(self.sample.x)
-        qe = np.exp(log_qe - self.sample.logscale)
-        return np.dot(self._F * qe, self._F.T) *\
+        # compute the normalized probabilities
+        log_qn = np.dot(self._F.T, self._fit.theta)
+        qn = np.exp(log_qn - self.sample.logscale)
+        return np.dot(self._F * qn, self._F.T) *\
             (np.exp(self.sample.logscale) / self.npts)
 
     def _get_var_theta(self):
@@ -116,8 +114,8 @@ class KLFit(object):
         # Pre-compute some stuff and cache it
         self._theta = None
         self._F = self.family.design_matrix(sample.x)
-        self._qe = None
-        self._log_qe = None
+        self._qn = None
+        self._log_qn = None
 
         # Initial guess for theta parameter (default is optimal constant fit)
         self._theta_init = np.zeros(self._F.shape[0])
@@ -138,10 +136,10 @@ class KLFit(object):
         Compute fit
         """
         if not theta is self._theta:
-            self._log_qe = np.dot(self._F.T, theta)
-            self._qe = np.exp(self._log_qe)
+            self._log_qn = np.dot(self._F.T, theta) - self.sample.logscale
+            self._qn = np.exp(self._log_qn)
             self._theta = theta
-            fail = np.isinf(self._log_qe).max() or np.isinf(self._qe).max()
+            fail = np.isinf(self._log_qn).max() or np.isinf(self._qn).max()
         else:
             fail = False
         return not fail
@@ -150,30 +148,30 @@ class KLFit(object):
         """
         Compute the empirical divergence:
 
-          sum[pe * log pe/qe + qe - pe],
+          sum[pn * log pn/qn + qn - pn],
 
         where:
-          pe is the target distribution
-          qe is the parametric fit
+          pn is the target distribution
+          qn is the parametric fit
         """
         if not self._update_fit(theta):
             return np.inf
-        return np.sum(self.sample.pe * (self.sample.log_pe - self._log_qe)
-                      + self._qe - self.sample.pe)
+        return np.sum(self.sample.pn * (self.sample.log_pn - self._log_qn)
+                      + self._qn - self.sample.pn)
 
     def _gradient(self, theta):
         """
         Compute the gradient of the loss.
         """
         self._update_fit(theta)
-        return np.dot(self._F, self._qe - self.sample.pe)
+        return np.dot(self._F, self._qn - self.sample.pn)
 
     def _hessian(self, theta):
         """
         Compute the hessian of the loss.
         """
         self._update_fit(theta)
-        return np.dot(self._F * self._qe, self._F.T)
+        return np.dot(self._F * self._qn, self._F.T)
 
     def _pseudo_hessian(self):
         """
@@ -211,7 +209,7 @@ class KLFit(object):
 
     def _var_integral(self, theta):
         self._update_fit(theta)
-        return np.dot(self._F * ((self.sample.pe - self._qe) ** 2), self._F.T)\
+        return np.dot(self._F * ((self.sample.pn - self._qn) ** 2), self._F.T)\
             * (np.exp(2 * self.sample.logscale) / (self.npts ** 2))
 
     def _sensitivity_matrix(self, theta):
@@ -224,14 +222,10 @@ class KLFit(object):
         return theta
 
     def _get_fit(self):
-        if self.family.check(self.sample.kernel):
-            return self.family.from_theta(\
-                self.theta + self.sample.kernel.theta)
-        elif self.sample.kernel.theta_dim < self.family.theta_dim:
-            kernel = self.sample.kernel.embed()
-            return self.family.from_theta(kernel.theta + self.theta)
-        else:
-            return self.family.from_theta(self.theta) * self.sample.kernel
+        return self.family.from_theta(self.theta)
+
+    def _get_integral(self):
+        return self._get_fit().integral()
 
     def _get_var_integral(self):
         return self._var_integral(self._theta)
@@ -254,6 +248,7 @@ class KLFit(object):
 
     theta = property(_get_theta)
     fit = property(_get_fit)
+    integral = property(_get_integral)
     var_integral = property(_get_var_integral)
     var_theta = property(_get_var_theta)
     sensitivity_matrix = property(_get_sensitivity_matrix)

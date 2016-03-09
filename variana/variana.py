@@ -48,8 +48,7 @@ def sample_fun(f, x):
 
 class Variana(object):
 
-    def __init__(self, target, kernel, ndraws, reflect=False,
-                 x=None, w=None):
+    def __init__(self, target, kernel, ndraws, reflect=False):
         """
         Variational sampler class.
 
@@ -80,7 +79,6 @@ class Variana(object):
         self.reflect = reflect
 
         # Sample random points
-        self.x, self.w = x, w
         t0 = time()
         self._sample()
         self.sampling_time = time() - t0
@@ -90,26 +88,15 @@ class Variana(object):
         Sample independent points from the specified kernel and
         compute associated distribution values.
         """
-        if self.x == None:
-            self.x = self.kernel.sample(ndraws=self.ndraws)
-        else:
-            self.x = np.reshape(self.x, (self.kernel.dim, len(self.x)))
+        self.x = self.kernel.sample(ndraws=self.ndraws)
         if self.reflect:
             self.x = reflect_sample(self.x, self.kernel.m)
-        log_p, self.target = sample_fun(self.target, self.x)
+        # Compute pn, the vector of sampled probability values
+        # normalized by the maximum probability within the sample
+        self.log_pn, self.target = sample_fun(self.target, self.x)
+        self.pn, self.logscale = safe_exp(self.log_pn)
+        self.log_pn -= self.logscale
 
-        self.log_pe = log_p - self.kernel.log(self.x)
-        self.pe, self.logscale = safe_exp(self.log_pe)
-        self.log_pe -= self.logscale
-
-        # This is a temporary HACK to implement a deterministic
-        # version of VS.
-        # The input weights are assumed to come from a
-        # quadrature rule, so they need be multiplied by the number of
-        # points for consistency with the random case where the
-        # weights are conventionally one
-        if not self.w == None:
-            self.log_pe += np.log(self.w) + np.log(len(self.w))
 
     def fit(self, objective='kl', **args):
         """
