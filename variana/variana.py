@@ -40,12 +40,10 @@ def as_gaussian(g):
 
 def sample_fun(f, x):
     try:
-        ff = f
-        y = f(x).squeeze()
+        return f(x).squeeze(), f
     except:
         ff = lambda x: np.array([f(xi) for xi in x.T])
-        y = ff(x).squeeze()
-    return y, ff
+        return ff(x).squeeze(), ff
 
 
 class Variana(object):
@@ -121,7 +119,8 @@ class Variana(object):
         ----------
         objective: str
           one of 'kl' or 'l' standing for discrete Kullback-Leibler
-          divergence minimization or Likelihood maximization, respectively
+          divergence minimization or weighted likelihood maximization,
+          respectively.
         """
         if objective == 'kl':
             return KLFit(self, **args)

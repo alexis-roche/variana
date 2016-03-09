@@ -27,15 +27,14 @@ class LFit(object):
         self.family = families[family](self.dim)
 
         # Pre-compute some stuff and cache it
-        self._cache = {'F': self.family.design_matrix(sample.x)}
+        self._F = self.family.design_matrix(sample.x)
 
         # Perform fit
         self._do_fitting()
         self.time = time() - t0
 
     def _do_fitting(self):
-        F = self._cache['F']
-        self._integral = np.dot(F, self.sample.pe) / self.npts
+        self._integral = np.dot(self._F, self.sample.pe) / self.npts
         self._integral *= np.exp(self.sample.logscale)
         self._fit = self.family.from_integral(self._integral)
 
@@ -46,10 +45,9 @@ class LFit(object):
         """
         Estimate variance on integral estimate
         """
-        F, pe, integral = self._cache['F'], self.sample.pe, self._integral
-        n = integral.size
-        var = np.dot(F * (pe ** 2), F.T) / self.npts \
-            - np.dot(integral.reshape(n, 1), integral.reshape(1, n))
+        n = self._integral.size
+        var = np.dot(self._F * (self.sample.pe ** 2), self._F.T) / self.npts \
+            - np.dot(self._integral.reshape(n, 1), self._integral.reshape(1, n))
         var /= self.npts
         return var
 
@@ -62,12 +60,11 @@ class LFit(object):
         return theta
 
     def _get_sensitivity_matrix(self):
-        F = self._cache['F']
         # compute the fitted importance weights
-        log_qe = np.dot(F.T, self._fit.theta) +\
+        log_qe = np.dot(self._F.T, self._fit.theta) +\
             - self.sample.kernel.log(self.sample.x)
         qe = np.exp(log_qe - self.sample.logscale)
-        return np.dot(F * qe, F.T) *\
+        return np.dot(self._F * qe, self._F.T) *\
             (np.exp(self.sample.logscale) / self.npts)
 
     def _get_var_theta(self):
@@ -117,15 +114,13 @@ class KLFit(object):
         self.family = families[family](self.dim)
 
         # Pre-compute some stuff and cache it
-        self._cache = {
-            'theta': None,
-            'F': self.family.design_matrix(sample.x),
-            'qe': None,
-            'log_qe': None
-            }
+        self._theta = None
+        self._F = self.family.design_matrix(sample.x)
+        self._qe = None
+        self._log_qe = None
 
         # Initial guess for theta parameter (default is optimal constant fit)
-        self._theta_init = np.zeros(self._cache['F'].shape[0])
+        self._theta_init = np.zeros(self._F.shape[0])
         if self.sample.Z is None:
             self._theta_init[0] = np.log(np.mean(self.sample.pe))
         else:
@@ -142,12 +137,11 @@ class KLFit(object):
         """
         Compute fit
         """
-        c = self._cache
-        if not theta is c['theta']:
-            c['log_qe'] = np.dot(c['F'].T, theta)
-            c['qe'] = np.exp(c['log_qe'])
-            c['theta'] = theta
-            fail = np.isinf(c['log_qe']).max() or np.isinf(c['qe']).max()
+        if not theta is self._theta:
+            self._log_qe = np.dot(self._F.T, theta)
+            self._qe = np.exp(self._log_qe)
+            self._theta = theta
+            fail = np.isinf(self._log_qe).max() or np.isinf(self._qe).max()
         else:
             fail = False
         return not fail
@@ -164,33 +158,29 @@ class KLFit(object):
         """
         if not self._update_fit(theta):
             return np.inf
-        c = self._cache
-        return np.sum(self.sample.pe * (self.sample.log_pe - c['log_qe'])
-                      + c['qe'] - self.sample.pe)
+        return np.sum(self.sample.pe * (self.sample.log_pe - self._log_qe)
+                      + self._qe - self.sample.pe)
 
     def _gradient(self, theta):
         """
         Compute the gradient of the loss.
         """
         self._update_fit(theta)
-        c = self._cache
-        return np.dot(c['F'], c['qe'] - self.sample.pe)
+        return np.dot(self._F, self._qe - self.sample.pe)
 
     def _hessian(self, theta):
         """
         Compute the hessian of the loss.
         """
         self._update_fit(theta)
-        c = self._cache
-        return np.dot(c['F'] * c['qe'], c['F'].T)
+        return np.dot(self._F * self._qe, self._F.T)
 
     def _pseudo_hessian(self):
         """
         Approximate the Hessian at the minimum by substituting the
         fitted distribution with the target distribution.
         """
-        c = self._cache
-        return np.dot(c['F'] * self.sample.pe, c['F'].T)
+        return np.dot(self._F * self.sample.pe, self._F.T)
 
     def _do_fitting(self):
         """
@@ -221,8 +211,7 @@ class KLFit(object):
 
     def _var_integral(self, theta):
         self._update_fit(theta)
-        c = self._cache
-        return np.dot(c['F'] * ((self.sample.pe - c['qe']) ** 2), c['F'].T)\
+        return np.dot(self._F * ((self.sample.pe - self._qe) ** 2), self._F.T)\
             * (np.exp(2 * self.sample.logscale) / (self.npts ** 2))
 
     def _sensitivity_matrix(self, theta):
