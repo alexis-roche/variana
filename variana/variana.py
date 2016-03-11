@@ -117,3 +117,31 @@ class Variana(object):
             raise ValueError('unknown objective')
 
 
+
+def vsfit(target, kernel, ndraws, guess=None, reflect=False, objective='kl'):
+    """
+    Given a target distribution p(x) and a Gaussian kernel w(x), this function returns a 
+    Gaussian fit q(x) to p(x) that approximately solves the KL minimization problem:
+
+    q = argmin D(wp/g||wq/g),
+
+    where g(x) is some initial guess Gaussian fit. If None, a flat distribution is assumed.
+
+    The KL divergence is approximated by sampling points indepedently from w(x), and optionally
+    reflecting the sample around the kernel mean.
+
+    Note that, if w=g, then the output approximately minimizes the global KL divergence D(p||q).
+    """
+    if guess is None:
+        t = target
+    else:
+        t = lambda x: target(x) - guess.log(x)
+    v = Variana(t, kernel, ndraws, reflect=reflect)
+    if guess is None:
+        return v.fit(objective=objective).fit
+    else:
+        return v.fit(objective=objective).fit * guess
+
+
+
+
