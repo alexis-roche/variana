@@ -1,4 +1,4 @@
-from .variana import Variana, vsfit
+from .variana import Variana, vsfit, gnewton
 from .gaussian import Gaussian
 
 from numpy.testing import Tester

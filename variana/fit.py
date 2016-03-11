@@ -117,12 +117,9 @@ class KLFit(object):
         self._qn = None
         self._log_qn = None
 
-        # Initial guess for theta parameter (default is optimal constant fit)
+        # Initial guess for theta parameter (optimal constant fit)
         self._theta_init = np.zeros(self._F.shape[0])
-        if self.sample.Z is None:
-            self._theta_init[0] = np.log(np.mean(self.sample.pe))
-        else:
-            self._theta_init[0] = np.log(self.sample.Z) - self.sample.logscale
+        self._theta_init[0] = -self.sample.logscale
 
         # Perform fit
         self.minimizer = minimizer

@@ -14,19 +14,16 @@ def reflect_sample(xs, m):
                       (xs.shape[0], 2 * xs.shape[1]))
 
 
-def as_gaussian(g):
+def as_normalized_gaussian(g):
     """
     renormalize input to unit integral
     """
     if isinstance(g, Gaussian):
-        return g.Z, Gaussian(g.m, g.V)
+        return Gaussian(g.m, g.V)
     elif isinstance(g, FactorGaussian):
-        return g.Z, FactorGaussian(g.m, g.v)
+        return FactorGaussian(g.m, g.v)
     if len(g) == 2:
-        Z = None
         m, V = np.asarray(g[0]), np.asarray(g[1])
-    elif len(g) == 3:
-        Z, m, V = float(g[0]), np.asarray(g[1]), np.asarray(g[2])
     else:
         raise ValueError('input not understood')
     if V.ndim < 2:
@@ -35,7 +32,7 @@ def as_gaussian(g):
         G = Gaussian(m, V)
     else:
         raise ValueError('input variance not understood')
-    return Z, G
+    return G
 
 
 def sample_fun(f, x):
@@ -73,7 +70,7 @@ class Variana(object):
         reflect: bool
           if True, reflect the sample about the sampling kernel mean
         """
-        self.Z, self.kernel = as_gaussian(kernel)
+        self.kernel = as_normalized_gaussian(kernel)
         self.target = target
         self.ndraws = ndraws
         self.reflect = reflect
@@ -141,6 +138,25 @@ def vsfit(target, kernel, ndraws, guess=None, reflect=False, objective='kl'):
         return v.fit(objective=objective).fit
     else:
         return v.fit(objective=objective).fit * guess
+
+
+  
+
+def gnewton(target, kernel, ndraws, niters, alpha=0.5, beta=0.5, reflect=False, objective='kl'):
+    guess = None
+    scale = lambda V: np.max(np.linalg.eigh(V)[0])
+
+    for i in range(niters):
+        print('Iteration %d' % (i+1))
+        print('kernel: m = %s, scale = %s' % (kernel.m, scale(kernel.V)))
+        guess = vsfit(target, kernel, ndraws, guess=guess, reflect=reflect, objective=objective)
+        print('guess: m = %s, scale = %f' % (guess.m, scale(guess.V)))
+        # new kernel
+        ##kernel = Gaussian(guess.m, alpha * guess.V)
+        m = alpha * kernel.m + (1 - alpha) * guess.m
+        V = beta * kernel.V + (1 - beta) * guess.V
+        kernel = Gaussian(m, V)
+    return guess
 
 
 
