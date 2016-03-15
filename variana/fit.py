@@ -35,7 +35,7 @@ class LFit(object):
 
     def _do_fitting(self):
         self._integral = np.dot(self._F, self.sample._pn) / self.npts
-        self._integral *= np.exp(self.sample._logscale)
+        self._integral *= self.sample._scale
         wq = self.family.from_integral(self._integral)
         self._fit = wq / self.sample.kernel
 
@@ -47,7 +47,7 @@ class LFit(object):
         Estimate variance on integral estimate
         """
         n = self._integral.size
-        var = np.dot(self._F * (self.sample._pn ** 2), self._F.T) / self.npts \
+        var = (self.sample._scale ** 2 / self.npts) * np.dot(self._F * (self.sample._pn ** 2), self._F.T)\
             - np.dot(self._integral.reshape(n, 1), self._integral.reshape(1, n))
         var /= self.npts
         return var
@@ -60,10 +60,9 @@ class LFit(object):
 
     def _get_sensitivity_matrix(self):
         # compute the normalized probabilities
-        log_qn = np.dot(self._F.T, self._fit.theta)
-        qn = np.exp(log_qn - self.sample._logscale)
-        return np.dot(self._F * qn, self._F.T) *\
-            (np.exp(self.sample._logscale) / self.npts)
+        log_qn = np.dot(self._F.T, self._fit.theta) - self.sample._logscale
+        qn = np.exp(log_qn)
+        return np.dot(self._F * qn, self._F.T) * (self.sample._scale / self.npts)
 
     def _get_var_theta(self):
         inv_sensitivity_matrix = inv_sym_matrix(self.sensitivity_matrix)
@@ -207,11 +206,10 @@ class KLFit(object):
     def _var_integral(self, theta):
         self._update_fit(theta)
         return np.dot(self._F * ((self.sample._pn - self._qn) ** 2), self._F.T)\
-            * (np.exp(2 * self.sample._logscale) / (self.npts ** 2))
+            * ((self.sample._scale / self.npts) ** 2)
 
     def _sensitivity_matrix(self, theta):
-        return self._hessian(self._theta) *\
-            (np.exp(self.sample._logscale) / self.npts)
+        return self._hessian(self._theta) * (self.sample._scale / self.npts)
 
     def _get_theta(self):
         theta = self._theta.copy()

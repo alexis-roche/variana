@@ -94,6 +94,8 @@ class Variana(object):
         self._pn, self._logscale = safe_exp(self._log_pn)
         self._log_pn -= self._logscale
 
+    def _get_scale(self):
+        return np.exp(self._logscale)
 
     def fit(self, objective='kl', **args):
         """
@@ -114,14 +116,14 @@ class Variana(object):
             raise ValueError('unknown objective')
 
     def _get_p(self):
-        return self._pn * np.exp(self._logscale)
+        return self._pn * self._scale
 
     def _get_log_p(self):
         return self._log_pn + self._logscale
 
     p = property(_get_p)
     log_p = property(_get_log_p)
-
+    _scale = property(_get_scale)
 
 def vsfit(target, kernel, ndraws, guess=None, reflect=False, objective='kl'):
     """
