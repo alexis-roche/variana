@@ -90,9 +90,9 @@ class Variana(object):
             self.x = reflect_sample(self.x, self.kernel.m)
         # Compute pn, the vector of sampled probability values
         # normalized by the maximum probability within the sample
-        self.log_pn, self.target = sample_fun(self.target, self.x)
-        self.pn, self.logscale = safe_exp(self.log_pn)
-        self.log_pn -= self.logscale
+        self._log_pn, self.target = sample_fun(self.target, self.x)
+        self._pn, self._logscale = safe_exp(self._log_pn)
+        self._log_pn -= self._logscale
 
 
     def fit(self, objective='kl', **args):
@@ -113,6 +113,14 @@ class Variana(object):
         else:
             raise ValueError('unknown objective')
 
+    def _get_p(self):
+        return self._pn * np.exp(self._logscale)
+
+    def _get_log_p(self):
+        return self._log_pn + self._logscale
+
+    p = property(_get_p)
+    log_p = property(_get_log_p)
 
 
 def vsfit(target, kernel, ndraws, guess=None, reflect=False, objective='kl'):
@@ -149,7 +157,8 @@ def gnewton(target, kernel, ndraws, niters, alpha=0.5, beta=0.5, reflect=False, 
     for i in range(niters):
         print('Iteration %d' % (i+1))
         print('kernel: m = %s, scale = %s' % (kernel.m, scale(kernel.V)))
-        guess = vsfit(target, kernel, ndraws, guess=guess, reflect=reflect, objective=objective)
+        #guess = vsfit(target, kernel, ndraws, guess=guess, reflect=reflect, objective=objective)
+        guess = vsfit(target, kernel, ndraws, reflect=reflect, objective=objective)
         print('guess: m = %s, scale = %f' % (guess.m, scale(guess.V)))
         # new kernel
         ##kernel = Gaussian(guess.m, alpha * guess.V)

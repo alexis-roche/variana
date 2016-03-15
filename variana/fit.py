@@ -34,8 +34,8 @@ class LFit(object):
         self.time = time() - t0
 
     def _do_fitting(self):
-        self._integral = np.dot(self._F, self.sample.pn) / self.npts
-        self._integral *= np.exp(self.sample.logscale)
+        self._integral = np.dot(self._F, self.sample._pn) / self.npts
+        self._integral *= np.exp(self.sample._logscale)
         wq = self.family.from_integral(self._integral)
         self._fit = wq / self.sample.kernel
 
@@ -47,7 +47,7 @@ class LFit(object):
         Estimate variance on integral estimate
         """
         n = self._integral.size
-        var = np.dot(self._F * (self.sample.pn ** 2), self._F.T) / self.npts \
+        var = np.dot(self._F * (self.sample._pn ** 2), self._F.T) / self.npts \
             - np.dot(self._integral.reshape(n, 1), self._integral.reshape(1, n))
         var /= self.npts
         return var
@@ -61,9 +61,9 @@ class LFit(object):
     def _get_sensitivity_matrix(self):
         # compute the normalized probabilities
         log_qn = np.dot(self._F.T, self._fit.theta)
-        qn = np.exp(log_qn - self.sample.logscale)
+        qn = np.exp(log_qn - self.sample._logscale)
         return np.dot(self._F * qn, self._F.T) *\
-            (np.exp(self.sample.logscale) / self.npts)
+            (np.exp(self.sample._logscale) / self.npts)
 
     def _get_var_theta(self):
         inv_sensitivity_matrix = inv_sym_matrix(self.sensitivity_matrix)
@@ -119,7 +119,7 @@ class KLFit(object):
 
         # Initial guess for theta parameter (optimal constant fit)
         self._theta_init = np.zeros(self._F.shape[0])
-        self._theta_init[0] = -self.sample.logscale
+        self._theta_init[0] = -self.sample._logscale
 
         # Perform fit
         self.minimizer = minimizer
@@ -133,7 +133,7 @@ class KLFit(object):
         Compute fit
         """
         if not theta is self._theta:
-            self._log_qn = np.dot(self._F.T, theta) - self.sample.logscale
+            self._log_qn = np.dot(self._F.T, theta) - self.sample._logscale
             self._qn = np.exp(self._log_qn)
             self._theta = theta
             fail = np.isinf(self._log_qn).max() or np.isinf(self._qn).max()
@@ -153,15 +153,15 @@ class KLFit(object):
         """
         if not self._update_fit(theta):
             return np.inf
-        return np.sum(self.sample.pn * (self.sample.log_pn - self._log_qn)
-                      + self._qn - self.sample.pn)
+        return np.sum(self.sample._pn * (self.sample._log_pn - self._log_qn)
+                      + self._qn - self.sample._pn)
 
     def _gradient(self, theta):
         """
         Compute the gradient of the loss.
         """
         self._update_fit(theta)
-        return np.dot(self._F, self._qn - self.sample.pn)
+        return np.dot(self._F, self._qn - self.sample._pn)
 
     def _hessian(self, theta):
         """
@@ -206,16 +206,16 @@ class KLFit(object):
 
     def _var_integral(self, theta):
         self._update_fit(theta)
-        return np.dot(self._F * ((self.sample.pn - self._qn) ** 2), self._F.T)\
-            * (np.exp(2 * self.sample.logscale) / (self.npts ** 2))
+        return np.dot(self._F * ((self.sample._pn - self._qn) ** 2), self._F.T)\
+            * (np.exp(2 * self.sample._logscale) / (self.npts ** 2))
 
     def _sensitivity_matrix(self, theta):
         return self._hessian(self._theta) *\
-            (np.exp(self.sample.logscale) / self.npts)
+            (np.exp(self.sample._logscale) / self.npts)
 
     def _get_theta(self):
         theta = self._theta.copy()
-        theta[0] += self.sample.logscale
+        theta[0] += self.sample._logscale
         return theta
 
     def _get_fit(self):
