@@ -117,9 +117,9 @@ class KLFit(object):
         self._qn = None
         self._log_qn = None
 
-        # Initial guess for theta parameter (optimal constant fit)
+        # Initial parameter guess: fit the sampled point with largest probability
         self._theta_init = np.zeros(self._F.shape[0])
-        self._theta_init[0] = -self.sample._logscale
+        self._theta_init[0] = self.sample._logscale
 
         # Perform fit
         self.minimizer = minimizer
@@ -215,7 +215,6 @@ class KLFit(object):
 
     def _get_theta(self):
         theta = self._theta.copy()
-        theta[0] += self.sample._logscale
         return theta
 
     def _get_fit(self):
