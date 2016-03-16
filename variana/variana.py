@@ -125,6 +125,7 @@ class Variana(object):
     log_p = property(_get_log_p)
     _scale = property(_get_scale)
 
+
 def vsfit(target, kernel, ndraws, guess=None, reflect=False, objective='kl'):
     """
     Given a target distribution p(x) and a Gaussian kernel w(x), this function returns a 
@@ -151,24 +152,31 @@ def vsfit(target, kernel, ndraws, guess=None, reflect=False, objective='kl'):
 
 
   
-
-def gnewton(target, kernel, ndraws, niters, alpha=0.5, beta=0.5, reflect=False, objective='kl'):
+def gnewton(target, kernel, ndraws, maxiter=100, reflect=False, objective='kl', tol=1e-5):
+    from scipy.optimize import brent
     guess = None
-    scale = lambda V: np.max(np.linalg.eigh(V)[0])
-
-    for i in range(niters):
+    for i in range(maxiter):
         print('Iteration %d' % (i+1))
-        print('kernel: m = %s, scale = %s' % (kernel.m, scale(kernel.V)))
-        #guess = vsfit(target, kernel, ndraws, guess=guess, reflect=reflect, objective=objective)
+        # Perform local quadratic approximation
+        print('x0 = %s' % kernel.m)
+        print('... Variational sampling')
         guess = vsfit(target, kernel, ndraws, reflect=reflect, objective=objective)
-        print('guess: m = %s, scale = %f' % (guess.m, scale(guess.V)))
-        # new kernel
-        ##kernel = Gaussian(guess.m, alpha * guess.V)
-        m = alpha * kernel.m + (1 - alpha) * guess.m
-        V = beta * kernel.V + (1 - beta) * guess.V
-        kernel = Gaussian(m, V)
-    return guess
-
-
+        print('tentative x1 = %s' % guess.m)
+        # Perform line search
+        print(' Brent line search')
+        x0 = kernel.m
+        xt = lambda a: x0 + a * (guess.m - x0)
+        f = lambda a: -target(xt(a))
+        amin, fmin, _, _ = brent(f, brack=(0, 1), tol=tol, full_output=True)
+        x1 = xt(amin)
+        print('corrected x1 = %s (target value = %f)' % (x1, -fmin))
+        # Update kernel
+        kernel = Gaussian(x1, kernel.V)
+        # Stopping criterion
+        err = np.max(np.abs(x1 - x0))
+        print('err = %f' % err)
+        if err < tol:
+            break
+    return x1, -fmin
 
 
