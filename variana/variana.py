@@ -45,33 +45,34 @@ def sample_fun(f, x):
 
 class Variana(object):
 
-    def __init__(self, target, kernel, ndraws, reflect=False):
-        """
-        Variational sampler class.
+    def __init__(self, target, cavity, gamma2=None, ndraws=None, reflect=False):
+        """Variational sampler class.
 
-        Fit a target distribution with a Gaussian distribution by
-        maximizing an approximate KL divergence based on independent
-        random sampling.
+        Fit a target factor with a Gaussian distribution by maximizing
+        an approximate KL divergence based on Gaussian quadrature or
+        independent random sampling.
 
         Parameters
         ----------
         target: callable
-          returns the log of the target distribution
+          returns the log of the target factor (utility)
 
-        kernel: tuple
+        cavity: tuple
           a tuple `(m, V)` where `m` is a vector representing the mean
           of the sampling distribution and `V` is a matrix or vector
           representing the variance. If a vector, a diagonal variance
           is assumed.
 
-        ndraws: int
-          sample size
+        ndraws: None or int
+          if None, a precision 3 quadrature rule is used. If int,
+          random sample size
 
         reflect: bool
-          if True, reflect the sample about the sampling kernel mean
+          if True, reflect the sample about the cavity mean
         """
-        self.kernel = as_normalized_gaussian(kernel)
+        self.cavity = as_normalized_gaussian(cavity)
         self.target = target
+        self.gamma2 = gamma2
         self.ndraws = ndraws
         self.reflect = reflect
 
@@ -80,19 +81,27 @@ class Variana(object):
         self._sample()
         self.sampling_time = time() - t0
 
-    def _sample(self, x=None, w=None):
+    def _sample(self):
         """
-        Sample independent points from the specified kernel and
+        Sample independent points from the specified cavity and
         compute associated distribution values.
         """
-        self.x = self.kernel.sample(ndraws=self.ndraws)
-        if self.reflect:
-            self.x = reflect_sample(self.x, self.kernel.m)
-        # Compute pn, the vector of sampled probability values
-        # normalized by the maximum probability within the sample
-        self._log_pn, self.target = sample_fun(self.target, self.x)
-        self._pn, self._logscale = safe_exp(self._log_pn)
-        self._log_pn -= self._logscale
+        if self.ndraws is None:
+            if self.gamma2 is None:
+                self.gamma2 = self.cavity.dim + .5
+            self.x, self.w = self.cavity.quad3(self.gamma2)
+            self.reflect = True
+        else:
+            self.x = self.cavity.random(ndraws=self.ndraws)
+            if self.reflect:
+                self.x = reflect_sample(self.x, self.cavity.m)
+            self.w = np.zeros(self.x.shape[1])
+            self.w[:] = 1 / float(self.x.shape[1])
+        # Compute fn, the vector of sampled factor values normalized
+        # by the maximum factor value within the sample
+        self._log_fn, self.target = sample_fun(self.target, self.x)
+        self._fn, self._logscale = safe_exp(self._log_fn)
+        self._log_fn -= self._logscale
 
     def _get_scale(self):
         return np.exp(self._logscale)
@@ -116,19 +125,19 @@ class Variana(object):
             raise ValueError('unknown objective')
 
     def _get_p(self):
-        return self._pn * self._scale
+        return self._fn * self._scale
 
     def _get_log_p(self):
-        return self._log_pn + self._logscale
+        return self._log_fn + self._logscale
 
     p = property(_get_p)
     log_p = property(_get_log_p)
     _scale = property(_get_scale)
 
 
-def vsfit(target, kernel, ndraws, guess=None, reflect=False, objective='kl'):
+def vsfit(target, cavity, ndraws, guess=None, reflect=False, objective='kl'):
     """
-    Given a target distribution p(x) and a Gaussian kernel w(x), this function returns a 
+    Given a target distribution p(x) and a Gaussian cavity w(x), this function returns a 
     Gaussian fit q(x) to p(x) that approximately solves the KL minimization problem:
 
     q = argmin D(wp/g||wq/g),
@@ -136,7 +145,7 @@ def vsfit(target, kernel, ndraws, guess=None, reflect=False, objective='kl'):
     where g(x) is some initial guess Gaussian fit. If None, a flat distribution is assumed.
 
     The KL divergence is approximated by sampling points indepedently from w(x), and optionally
-    reflecting the sample around the kernel mean.
+    reflecting the sample around the cavity mean.
 
     Note that, if w=g, then the output approximately minimizes the global KL divergence D(p||q).
     """
@@ -144,7 +153,7 @@ def vsfit(target, kernel, ndraws, guess=None, reflect=False, objective='kl'):
         t = target
     else:
         t = lambda x: target(x) - guess.log(x)
-    v = Variana(t, kernel, ndraws, reflect=reflect)
+    v = Variana(t, cavity, ndraws, reflect=reflect)
     if guess is None:
         return v.fit(objective=objective).fit
     else:
@@ -152,26 +161,26 @@ def vsfit(target, kernel, ndraws, guess=None, reflect=False, objective='kl'):
 
 
   
-def gnewton(target, kernel, ndraws, maxiter=100, reflect=False, objective='kl', tol=1e-5):
+def gnewton(target, cavity, ndraws, maxiter=100, reflect=False, objective='kl', tol=1e-5):
     from scipy.optimize import brent
     guess = None
     for i in range(maxiter):
         print('Iteration %d' % (i+1))
         # Perform local quadratic approximation
-        print('x0 = %s' % kernel.m)
+        print('x0 = %s' % cavity.m)
         print('... Variational sampling')
-        guess = vsfit(target, kernel, ndraws, reflect=reflect, objective=objective)
+        guess = vsfit(target, cavity, ndraws, reflect=reflect, objective=objective)
         print('tentative x1 = %s' % guess.m)
         # Perform line search
         print(' Brent line search')
-        x0 = kernel.m
+        x0 = cavity.m
         xt = lambda a: x0 + a * (guess.m - x0)
         f = lambda a: -target(xt(a))
         amin, fmin, _, _ = brent(f, brack=(0, 1), tol=tol, full_output=True)
         x1 = xt(amin)
         print('corrected x1 = %s (target value = %f)' % (x1, -fmin))
-        # Update kernel
-        kernel = Gaussian(x1, kernel.V)
+        # Update cavity
+        cavity = Gaussian(x1, cavity.V)
         # Stopping criterion
         err = np.max(np.abs(x1 - x0))
         print('err = %f' % err)

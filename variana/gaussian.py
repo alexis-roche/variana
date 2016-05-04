@@ -34,6 +34,26 @@ def _sample_dim(dim):
     return int(-1.5 + np.sqrt(.25 + 2 * dim))
 
 
+def _quad3(m, sqrtV, gamma2):
+    """
+    Return point and weight arrays with respective shapes (dim, 2*dim+1) and (2*dim+1,)
+    """
+    dim = len(m)
+    npts = 2 * dim + 1
+    # create output arrays
+    xs = np.zeros((dim, npts))
+    ws = np.zeros(npts)
+    # compute weights
+    tmp = 1 / float(gamma2)
+    ws[0] = 1 - dim * tmp
+    ws[1:] = .5 * tmp
+    # compute points
+    xs.T[...] = m.T
+    xs[:, 1:(dim + 1)] += sqrtV
+    xs[:, (dim + 1):] -= sqrtV
+    return xs, ws
+
+
 class Gaussian(object):
     """
     A class to describe unnormalized Gaussian distributions under the
@@ -172,12 +192,15 @@ class Gaussian(object):
     def __pow__(self, power):
         return self.__class__(theta=power * self.theta)
 
-    def sample(self, ndraws=1):
+    def random(self, ndraws=1):
         """
-        Return a d x N array.
+        Return an array with shape (dim, ndraws)
         """
         xs = np.dot(self._sqrtV, np.random.normal(size=(self._dim, ndraws)))
         return (self._m + xs.T).T  # preserves shape
+
+    def quad3(self, gamma2):
+        return _quad3(self._m, self._sqrtV, gamma2)
 
     def kl_div(self, other):
         """
@@ -225,6 +248,38 @@ class Gaussian(object):
     invV = property(_get_invV)
     sqrtV = property(_get_sqrtV)
     theta = property(_get_theta, _set_theta)
+
+
+class GaussianFamily(object):
+
+    def __init__(self, dim):
+        self.dim = dim
+        self.theta_dim = (dim * (dim + 1)) / 2 + dim + 1
+
+    def design_matrix(self, pts):
+        """
+        pts: array with shape (dim, npts)
+        Returns an array with shape (theta_dim, npts)
+        """
+        I, J = np.triu_indices(pts.shape[0])
+        F = np.array([pts[i, :] * pts[j, :] for i, j in zip(I, J)])
+        return np.concatenate((np.ones((1, pts.shape[1])), pts, F))
+
+    def from_integral(self, integral):
+        Z = integral[0]
+        m = integral[1: (self.dim + 1)] / Z
+        V = np.zeros((self.dim, self.dim))
+        idx = np.triu_indices(self.dim)
+        V[idx] = integral[(self.dim + 1):] / Z
+        V.T[np.triu_indices(self.dim)] = V[idx]
+        V -= np.dot(m.reshape(m.size, 1), m.reshape(1, m.size))
+        return Gaussian(m, V, Z=Z)
+
+    def from_theta(self, theta):
+        return Gaussian(theta=theta)
+
+    def check(self, obj):
+        return isinstance(obj, Gaussian)
 
 
 class FactorGaussian(object):
@@ -325,10 +380,13 @@ class FactorGaussian(object):
         """
         return self._K * np.exp(-.5 * self.mahalanobis(xs))
 
-    def sample(self, ndraws=1):
+    def random(self, ndraws=1):
         xs = (np.sqrt(np.abs(self._v)) * \
                   np.random.normal(size=(self._dim, ndraws)).T).T
         return (self._m + xs.T).T  # preserves shape
+
+    def quad3(self, gamma2):
+        return _quad3(self._m, self._get_sqrtV(), gamma2)
 
     def __str__(self):
         s = 'Factored Gaussian distribution with parameters:\n'
@@ -387,37 +445,6 @@ class FactorGaussian(object):
     theta = property(_get_theta, _set_theta)
 
 
-class GaussianFamily(object):
-
-    def __init__(self, dim):
-        self.dim = dim
-        self.theta_dim = (dim * (dim + 1)) / 2 + dim + 1
-
-    def design_matrix(self, pts):
-        """
-        pts: array with shape (dim, n)
-        """
-        I, J = np.triu_indices(pts.shape[0])
-        F = np.array([pts[i, :] * pts[j, :] for i, j in zip(I, J)])
-        return np.concatenate((np.ones((1, pts.shape[1])), pts, F))
-
-    def from_integral(self, integral):
-        Z = integral[0]
-        m = integral[1: (self.dim + 1)] / Z
-        V = np.zeros((self.dim, self.dim))
-        idx = np.triu_indices(self.dim)
-        V[idx] = integral[(self.dim + 1):] / Z
-        V.T[np.triu_indices(self.dim)] = V[idx]
-        V -= np.dot(m.reshape(m.size, 1), m.reshape(1, m.size))
-        return Gaussian(m, V, Z=Z)
-
-    def from_theta(self, theta):
-        return Gaussian(theta=theta)
-
-    def check(self, obj):
-        return isinstance(obj, Gaussian)
-
-
 class FactorGaussianFamily(object):
 
     def __init__(self, dim):
@@ -426,7 +453,8 @@ class FactorGaussianFamily(object):
 
     def design_matrix(self, pts):
         """
-        pts: array with shape (dim, n)
+        pts: array with shape (dim, npts)
+        Returns an array with shape (theta_dim, npts)
         """
         return np.concatenate((np.ones((1, pts.shape[1])), pts,  pts ** 2))
 
@@ -441,3 +469,5 @@ class FactorGaussianFamily(object):
 
     def check(self, obj):
         return isinstance(obj, FactorGaussian)
+
+
