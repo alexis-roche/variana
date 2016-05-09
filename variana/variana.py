@@ -5,34 +5,13 @@ from time import time
 import numpy as np
 
 from .utils import safe_exp
-from .gaussian import Gaussian, FactorGaussian
-from .fit import KLFit, LFit
+from .gaussian import as_normalized_gaussian
+from .fit import VariationalFit, QuadratureFit
 
 
 def reflect_sample(xs, m):
     return np.reshape(np.array([xs.T, m - xs.T]).T,
                       (xs.shape[0], 2 * xs.shape[1]))
-
-
-def as_normalized_gaussian(g):
-    """
-    renormalize input to unit integral
-    """
-    if isinstance(g, Gaussian):
-        return Gaussian(g.m, g.V)
-    elif isinstance(g, FactorGaussian):
-        return FactorGaussian(g.m, g.v)
-    if len(g) == 2:
-        m, V = np.asarray(g[0]), np.asarray(g[1])
-    else:
-        raise ValueError('input not understood')
-    if V.ndim < 2:
-        G = FactorGaussian(m, V)
-    elif V.ndim == 2:
-        G = Gaussian(m, V)
-    else:
-        raise ValueError('input variance not understood')
-    return G
 
 
 def sample_fun(f, x):
@@ -106,23 +85,21 @@ class Variana(object):
     def _get_scale(self):
         return np.exp(self._logscale)
 
-    def fit(self, objective='kl', **args):
+    def fit(self, method='variational', **args):
         """
         Perform fitting.
 
         Parameters
         ----------
-        objective: str
-          one of 'kl' or 'l' standing for discrete Kullback-Leibler
-          divergence minimization or weighted likelihood maximization,
-          respectively.
+        method: str
+          one of 'laplace', 'quadrature' or 'variational'.
         """
-        if objective == 'kl':
-            return KLFit(self, **args)
-        elif objective == 'l':
-            return LFit(self, **args)
+        if method == 'variational':
+            return VariationalFit(self, **args)
+        elif method == 'quadrature':
+            return QuadratureFit(self, **args)
         else:
-            raise ValueError('unknown objective')
+            raise ValueError('unknown method')
 
     def _get_p(self):
         return self._fn * self._scale
@@ -135,57 +112,48 @@ class Variana(object):
     _scale = property(_get_scale)
 
 
-def vsfit(target, cavity, ndraws, guess=None, reflect=False, objective='kl'):
-    """
-    Given a target distribution p(x) and a Gaussian cavity w(x), this function returns a 
-    Gaussian fit q(x) to p(x) that approximately solves the KL minimization problem:
+def prod_factors(f):
+    out = f[0]
+    for i in range(1, len(f)):
+        out *= f[i]
+    return out
+    
 
-    q = argmin D(wp/g||wq/g),
+class NumEP(object):
 
-    where g(x) is some initial guess Gaussian fit. If None, a flat distribution is assumed.
+    def __init__(self, utility, batches, guess, niters=1, gamma2=None, ndraws=None, reflect=None, method='variational'):
+        """
+        Assume: utility = fn(x, i)
+        """
+        self.utility = utility
+        self.batches = batches
+        self.approx_factors = [as_normalized_gaussian(guess) for a in batches]
+        self.niters = niters
+        self.gamma2 = gamma2
+        self.ndraws = ndraws
+        self.reflect = reflect
+        self.method = method
 
-    The KL divergence is approximated by sampling points indepedently from w(x), and optionally
-    reflecting the sample around the cavity mean.
+    def _get_gaussian(self):
+        return prod_factors(self.approx_factors)
 
-    Note that, if w=g, then the output approximately minimizes the global KL divergence D(p||q).
-    """
-    if guess is None:
-        t = target
-    else:
-        t = lambda x: target(x) - guess.log(x)
-    v = Variana(t, cavity, ndraws, reflect=reflect)
-    if guess is None:
-        return v.fit(objective=objective).fit
-    else:
-        return v.fit(objective=objective).fit * guess
+    gaussian = property(_get_gaussian)
 
+    def run(self): 
+        for a in self.batches:
+            target = lambda x: self.utility(x, a)
+            cavity = prod_factors([self.approx_factors[b] for b in [b for b in self.batches if b != a]])
+            v = Variana(target, cavity, gamma2=self.gamma2, ndraws=self.ndraws, reflect=self.reflect)
+            tmp = v.fit(method=self.method, family=cavity.family).gaussian
+            # update factor only if the candidate fit is numerically defined
+            if not np.max(np.isinf(tmp.theta)):
+                self.approx_factors[a] = tmp
+            else:
+                print('Come on, this is shit!')
 
-  
-def gnewton(target, cavity, ndraws, maxiter=100, reflect=False, objective='kl', tol=1e-5):
-    from scipy.optimize import brent
-    guess = None
-    for i in range(maxiter):
-        print('Iteration %d' % (i+1))
-        # Perform local quadratic approximation
-        print('x0 = %s' % cavity.m)
-        print('... Variational sampling')
-        guess = vsfit(target, cavity, ndraws, reflect=reflect, objective=objective)
-        print('tentative x1 = %s' % guess.m)
-        # Perform line search
-        print(' Brent line search')
-        x0 = cavity.m
-        xt = lambda a: x0 + a * (guess.m - x0)
-        f = lambda a: -target(xt(a))
-        amin, fmin, _, _ = brent(f, brack=(0, 1), tol=tol, full_output=True)
-        x1 = xt(amin)
-        print('corrected x1 = %s (target value = %f)' % (x1, -fmin))
-        # Update cavity
-        cavity = Gaussian(x1, cavity.V)
-        # Stopping criterion
-        err = np.max(np.abs(x1 - x0))
-        print('err = %f' % err)
-        if err < tol:
-            break
-    return x1, -fmin
+    def __call__(self):
+        for i in range(self.niters):
+            print('Iteration n. %d/%d' % (i + 1, niters))
+            self.run()
 
 

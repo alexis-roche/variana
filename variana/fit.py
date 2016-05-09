@@ -2,24 +2,12 @@ from time import time
 import numpy as np
 
 from .utils import (inv_sym_matrix, min_methods)
-from .gaussian import (GaussianFamily, FactorGaussianFamily)
+from .gaussian import instantiate_family
 
 VERBOSE = False
 
 
-def instantiate_family(key, dim): 
-    """
-    Instantiate fitting family
-    """
-    families = {'gaussian': GaussianFamily,
-                'factor_gaussian': FactorGaussianFamily}
-    if key not in families.keys():
-        raise ValueError('unknown family')
-    return families[key](dim)
-
-
-
-class LFit(object):
+class QuadratureFit(object):
 
     def __init__(self, sample, family='gaussian'):
         """
@@ -42,7 +30,12 @@ class LFit(object):
         self._integral = np.dot(self._F, self.sample.w * self.sample._fn)
         self._integral *= self.sample._scale
         wq = self.family.from_integral(self._integral)
+        print('*********')
+        print self.sample.cavity.theta
+        print wq.theta
         self._gaussian = wq / self.sample.cavity
+        print self._gaussian.theta
+
 
     def _get_integral(self):
         return self._integral
@@ -59,7 +52,7 @@ class LFit(object):
 
 
 
-class KLFit(object):
+class VariationalFit(object):
 
     def __init__(self, sample, family='gaussian', tol=1e-5, maxiter=None,
                  minimizer='newton'):

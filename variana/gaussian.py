@@ -7,6 +7,7 @@ import numpy as np
 from .utils import (hdot, force_tiny, decomp_sym_matrix)
 
 
+
 def Z_to_K(Z, dim, detV):
     return Z * force_tiny(detV) ** (-.5)\
         * (2 * np.pi) ** (-.5 * dim)
@@ -63,9 +64,9 @@ class Gaussian(object):
     """
 
     def __init__(self, m=None, V=None, K=None, Z=None, theta=None):
-
+        self.family = 'gaussian'
         # If theta is provided, ignore other parameters
-        if not theta == None:
+        if not theta is None:
             self._set_theta(theta)
         else:
             self._set_moments(m, V, K, Z)
@@ -81,26 +82,23 @@ class Gaussian(object):
         m = np.asarray(m)
         dim = m.size
         self._set_dimensions(dim)
-
         # Mean and variance
         m = np.nan_to_num(np.reshape(m, (dim,)))
         V = np.nan_to_num(np.reshape(np.asarray(V), (dim, dim)))
         self._dim = dim
         self._m = m
         self._V = V
-
         # Compute the inverse and the square root of the variance
         # matrix
         abs_s, sign_s, P = decomp_sym_matrix(V)
         self._invV = np.dot(np.dot(P, np.diag(sign_s / abs_s)), P.T)
         self._detV = np.prod(abs_s * sign_s)
         self._sqrtV = np.dot(np.dot(P, np.diag(abs_s ** .5)), P.T)
-
         # Normalization constant
-        if not K == None:
+        if not K is None:
             self._K = float(K)
         else:
-            if Z == None:
+            if Z is None:
                 Z = 1.0
             self._K = Z_to_K(Z, self._dim, self._detV)
 
@@ -285,7 +283,8 @@ class GaussianFamily(object):
 class FactorGaussian(object):
 
     def __init__(self, m=None, v=None, K=None, Z=None, theta=None):
-        if not theta == None:
+        self.family = 'factor_gaussian'
+        if not theta is None:
             self._set_theta(theta)
         else:
             self._set_moments(m, v, K, Z)
@@ -298,21 +297,19 @@ class FactorGaussian(object):
         m = np.asarray(m)
         dim = m.size
         self._set_dimensions(dim)
-
         # Mean and variance
         m = np.nan_to_num(np.reshape(m, (dim,)))
         v = np.nan_to_num(np.reshape(v, (dim,)))
         self._dim = dim
         self._m = m
-        self._v = v
-        self._invv = np.nan_to_num(1 / self._v)
-        self._detV = np.prod(v)
-
+        self._v = force_tiny(v)
+        self._invv = 1 / self._v
+        self._detV = np.prod(self._v)
         # Normalization constant
-        if not K == None:
+        if not K is None:
             self._K = float(K)
         else:
-            if Z == None:
+            if Z is None:
                 Z = 1.0
             self._K = Z_to_K(Z, self._dim, self._detV)
 
@@ -344,7 +341,7 @@ class FactorGaussian(object):
         return np.diag(np.sqrt(np.abs(self._v)))
 
     def _get_theta(self):
-        invV = np.nan_to_num(1 / self._v)
+        invV = 1 / self._v
         theta2 = -.5 * invV
         theta1 = invV * self._m
         theta0 = np.log(self._K) - .5 * np.dot(self._m, theta1)
@@ -355,10 +352,11 @@ class FactorGaussian(object):
         dim = (theta.size - 1) / 2
         self._set_dimensions(dim)
         invv = -2 * theta[(dim + 1):]
-        self._invv = invv
-        self._v = np.nan_to_num(1 / invv)
+        self._invv = force_tiny(invv)
+        self._v = 1 / self._invv
         self._m = self._v * theta[1:(dim + 1)]
-        self._K = np.exp(theta[0] + .5 * np.dot(self._m, invv * self._m))
+        ###self._K = np.exp(theta[0] + .5 * np.dot(self._m, invv * self._m))
+        self._K = force_tiny(np.exp(theta[0] + .5 * np.dot(self._m, invv * self._m)))
         self._detV = np.prod(self._v)
 
     def rescale(self, c):
@@ -469,5 +467,38 @@ class FactorGaussianFamily(object):
 
     def check(self, obj):
         return isinstance(obj, FactorGaussian)
+
+
+def as_normalized_gaussian(g):
+    """
+    renormalize input to unit integral
+    """
+    if isinstance(g, Gaussian):
+        return Gaussian(g.m, g.V)
+    elif isinstance(g, FactorGaussian):
+        return FactorGaussian(g.m, g.v)
+    if len(g) == 2:
+        m, V = np.asarray(g[0]), np.asarray(g[1])
+    else:
+        raise ValueError('input not understood')
+    if V.ndim < 2:
+        G = FactorGaussian(m, V)
+    elif V.ndim == 2:
+        G = Gaussian(m, V)
+    else:
+        raise ValueError('input variance not understood')
+    return G
+
+
+def instantiate_family(key, dim): 
+    """
+    Instantiate Gaussian family
+    """
+    if key == 'gaussian':
+        return GaussianFamily(dim)
+    elif key == 'factor_gaussian':
+        return FactorGaussianFamily(dim)
+    else:  # if key not in families.keys():
+        raise ValueError('unknown family')
 
 
