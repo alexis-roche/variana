@@ -49,9 +49,11 @@ def _quad3(m, sqrtV, gamma2):
     ws[0] = 1 - dim * tmp
     ws[1:] = .5 * tmp
     # compute points
+    gamma = np.sqrt(gamma2)
+    tmp = gamma * sqrtV
     xs.T[...] = m.T
-    xs[:, 1:(dim + 1)] += sqrtV
-    xs[:, (dim + 1):] -= sqrtV
+    xs[:, 1:(dim + 1)] += tmp
+    xs[:, (dim + 1):] -= tmp
     return xs, ws
 
 
