@@ -356,16 +356,8 @@ class FactorGaussian(object):
         self._invv = force_tiny(invv)
         self._v = 1 / self._invv
         self._m = self._v * theta[1:(dim + 1)]
-        ###self._K = np.exp(theta[0] + .5 * np.dot(self._m, invv * self._m))
         self._K = force_tiny(np.exp(theta[0] + .5 * np.dot(self._m, self._invv * self._m)))
         self._detV = np.prod(self._v)
-        """print('******************')
-        print(theta)
-        print invv
-        print self._invv
-        print self._v
-        print self._m
-        """
 
     def rescale(self, c):
         self._K *= c
