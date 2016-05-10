@@ -49,8 +49,7 @@ def _quad3(m, sqrtV, gamma2):
     ws[0] = 1 - dim * tmp
     ws[1:] = .5 * tmp
     # compute points
-    gamma = np.sqrt(gamma2)
-    tmp = gamma * sqrtV
+    tmp = np.sqrt(gamma2) * sqrtV
     xs.T[...] = m.T
     xs[:, 1:(dim + 1)] += tmp
     xs[:, (dim + 1):] -= tmp
@@ -358,8 +357,15 @@ class FactorGaussian(object):
         self._v = 1 / self._invv
         self._m = self._v * theta[1:(dim + 1)]
         ###self._K = np.exp(theta[0] + .5 * np.dot(self._m, invv * self._m))
-        self._K = force_tiny(np.exp(theta[0] + .5 * np.dot(self._m, invv * self._m)))
+        self._K = force_tiny(np.exp(theta[0] + .5 * np.dot(self._m, self._invv * self._m)))
         self._detV = np.prod(self._v)
+        """print('******************')
+        print(theta)
+        print invv
+        print self._invv
+        print self._v
+        print self._m
+        """
 
     def rescale(self, c):
         self._K *= c

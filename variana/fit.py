@@ -30,12 +30,7 @@ class QuadratureFit(object):
         self._integral = np.dot(self._F, self.sample.w * self.sample._fn)
         self._integral *= self.sample._scale
         wq = self.family.from_integral(self._integral)
-        print('*********')
-        print self.sample.cavity.theta
-        print wq.theta
         self._gaussian = wq / self.sample.cavity
-        print self._gaussian.theta
-
 
     def _get_integral(self):
         return self._integral

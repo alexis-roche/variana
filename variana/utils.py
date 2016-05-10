@@ -8,9 +8,7 @@ import numpy as np
 from scipy.linalg import cho_factor, cho_solve, eigh
 from scipy.optimize import fmin_cg, fmin_ncg, fmin_bfgs
 
-dinfo = np.finfo(np.double)
-TINY = dinfo.tiny
-HUGE = dinfo.max
+TINY = 1e-10
 
 
 def force_tiny(x):
