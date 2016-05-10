@@ -4,9 +4,9 @@ Variational sampling
 from time import time
 import numpy as np
 
-from .utils import safe_exp
-from .gaussian import as_normalized_gaussian, Gaussian, FactorGaussian
-from .fit import VariationalFit, QuadratureFit
+from .utils import (safe_exp, approx_gradient, approx_hessian_diag, approx_hessian)
+from .gaussian import (as_normalized_gaussian, Gaussian, FactorGaussian)
+from .fit import (VariationalFit, QuadratureFit)
 
 
 def reflect_sample(xs, m):
@@ -162,22 +162,39 @@ class NumEP(object):
 
     gaussian = property(_get_gaussian)
 
+    def cavity(self, a):
+        return prod_factors([self.approx_factors[b] for b in [b for b in self.batches if b != a]])
+	
+    def update_factor(self, a):
+        target = lambda x: self.utility(x, a)
+        cavity = self.cavity(a)
+        if self.method in ('quadrature', 'variational'):
+            v = Variana(target, cavity, gamma2=self.gamma2, ndraws=self.ndraws, reflect=self.reflect)
+            prop = v.fit(method=self.method, family=cavity.family).gaussian
+        elif self.method == 'laplace':
+            if self.gradient is None:
+                g = lambda x: approx_gradient(target, x, 1e-5)
+            else:
+                g = lambda x: self.gradient(x, a)
+            if self.hessian is None:
+                if cavity.family == 'factor_gaussian':
+                    h = lambda x: approx_hessian_diag(target, x, 1e-5)
+                else:
+                    h = lambda x: approx_hessian(target, x, 1e-5)
+            else:
+                h = lambda x: self.hessian(x, a)
+            prop = laplace_approx(target, g, h, cavity)
+        else:
+            raise ValueError('not a method I am aware of, sorry')
+        # update factor only if the candidate fit is numerically defined
+        if not np.max(np.isinf(prop.theta)):
+            self.approx_factors[a] = prop
+        #else:
+        #    print('shit happens')
+
     def run(self): 
         for a in self.batches:
-            target = lambda x: self.utility(x, a)
-            cavity = prod_factors([self.approx_factors[b] for b in [b for b in self.batches if b != a]])
-            if self.method in ('quadrature', 'variational'):
-                v = Variana(target, cavity, gamma2=self.gamma2, ndraws=self.ndraws, reflect=self.reflect)
-                prop = v.fit(method=self.method, family=cavity.family).gaussian
-            elif self.method == 'laplace':
-                g = lambda x: self.gradient(x, a)
-                h = lambda x: self.hessian(x, a)
-                prop = laplace_approx(target, g, h, cavity)
-            else:
-                raise ValueError('not a method I am aware of, sorry')
-            # update factor only if the candidate fit is numerically defined
-            if not np.max(np.isinf(prop.theta)):
-                self.approx_factors[a] = prop
+			self.update_factor(a)
 
     def __call__(self):
         for i in range(self.niters):

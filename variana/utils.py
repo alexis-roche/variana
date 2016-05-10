@@ -250,3 +250,103 @@ min_methods = {'steepest': SteepestDescent,
                'cg': ScipyCG,
                'ncg': ScipyNCG,
                'bfgs': ScipyBFGS}
+
+
+def approx_gradient(f, x, epsilon):
+    """
+    Approximate the gradient of a function using central finite
+    differences
+
+    Parameters
+    ----------
+    f: callable
+      The function to differentiate
+    x: ndarray
+      Point where the function gradient is to be evaluated
+    epsilon: float
+      Stepsize for finite differences
+
+    Returns
+    -------
+    g: ndarray
+      Function gradient at `x`
+    """
+    npts = 1
+    n = x.shape[0]
+    if len(x.shape) > 1:
+        npts = x.shape[1]
+    g = np.zeros((n, npts))
+    ei = np.zeros(n)
+    for i in range(n):
+        ei[i] = .5 * epsilon
+        g[i, :] = (f((x.T + ei).T) - f((x.T - ei).T)) / epsilon
+        ei[i] = 0
+    return g.squeeze()
+
+
+def approx_hessian_diag(f, x, epsilon):
+    """
+    Approximate the Hessian diagonal of a function using central
+    finite differences
+
+    Parameters
+    ----------
+    f: callable
+      The function to differentiate
+    x: ndarray
+      Point where the Hessian is to be evaluated
+    epsilon: float
+      Stepsize for finite differences
+
+    Returns
+    -------
+    h: ndarray
+      Diagonal of the Hessian at `x`
+    """
+    npts = 1
+    n = x.shape[0]
+    if len(x.shape) > 1:
+        npts = x.shape[1]
+    h = np.zeros((n, npts))
+    ei = np.zeros(n)
+    fx = f(x)
+    for i in range(n):
+        ei[i] = epsilon
+        h[i, :] = (f((x.T + ei).T) + f((x.T - ei).T) - 2 * fx) / (epsilon ** 2)
+        ei[i] = 0
+    return h.squeeze()
+
+
+def approx_hessian(f, x, epsilon):
+    """
+    Approximate the full Hessian matrix of a function using central
+    finite differences
+
+    Parameters
+    ----------
+    f: callable
+      The function to differentiate
+    x: ndarray
+      Point where the Hessian is to be evaluated
+    epsilon: float
+      Stepsize for finite differences
+
+    Returns
+    -------
+    H: ndarray
+      Hessian matrix at `x`
+    """
+    npts = 1
+    n = x.shape[0]
+    if len(x.shape) > 1:
+        npts = x.shape[1]
+    H = np.zeros((n, n, npts))
+    ei = np.zeros(n)
+    for i in range(n):
+        ei[i] = .5 * epsilon
+        g1 = approx_gradient(f, (x.T + ei).T, epsilon)
+        g2 = approx_gradient(f, (x.T - ei).T, epsilon)
+        H[i, ...] = (g1 - g2) / epsilon
+        ei[i] = 0
+    return H.squeeze()
+
