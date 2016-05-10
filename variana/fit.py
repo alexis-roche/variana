@@ -179,4 +179,3 @@ class VariationalFit(object):
     gaussian = property(_get_gaussian)
     integral = property(_get_integral)
 
-

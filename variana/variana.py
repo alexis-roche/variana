@@ -101,14 +101,14 @@ class Variana(object):
         else:
             raise ValueError('unknown method')
 
-    def _get_p(self):
+    def _get_f(self):
         return self._fn * self._scale
 
-    def _get_log_p(self):
+    def _get_log_f(self):
         return self._log_fn + self._logscale
 
-    p = property(_get_p)
-    log_p = property(_get_log_p)
+    f = property(_get_f)
+    log_f = property(_get_log_f)
     _scale = property(_get_scale)
 
 
