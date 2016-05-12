@@ -140,7 +140,7 @@ def laplace_approx(u, g, h, cavity):
 
 class NumEP(object):
 
-    def __init__(self, utility, batches, guess, niters=1, 
+    def __init__(self, utility, batches, guess, prior=None, niters=1, 
                  gamma2=None, ndraws=None, reflect=None, method='variational',
                  gradient=None, hessian=None):
         """
@@ -149,6 +149,10 @@ class NumEP(object):
         self.utility = utility
         self.batches = batches
         self.approx_factors = [as_normalized_gaussian(guess) for a in batches]
+        if prior is None:
+            self.prior = FactorGaussian(np.zeros(guess.dim), 1e10 * np.ones(guess.dim))
+        else:
+            self.prior = as_normalized_gaussian(prior)
         self.niters = niters
         self.gamma2 = gamma2
         self.ndraws = ndraws
@@ -158,12 +162,12 @@ class NumEP(object):
         self.hessian = hessian
 
     def _get_gaussian(self):
-        return prod_factors(self.approx_factors)
+        return prod_factors([self.prior] + self.approx_factors)
 
     gaussian = property(_get_gaussian)
 
     def cavity(self, a):
-        return prod_factors([self.approx_factors[b] for b in [b for b in self.batches if b != a]])
+        return prod_factors([self.prior] + [self.approx_factors[b] for b in [b for b in self.batches if b != a]])
 	
     def update_factor(self, a):
         target = lambda x: self.utility(x, a)
@@ -194,7 +198,7 @@ class NumEP(object):
 
     def run(self): 
         for a in self.batches:
-			self.update_factor(a)
+	    self.update_factor(a)
 
     def __call__(self):
         for i in range(self.niters):
