@@ -9,12 +9,17 @@ from scipy.linalg import cho_factor, cho_solve, eigh
 from scipy.optimize import fmin_cg, fmin_ncg, fmin_bfgs
 
 TINY = 1e-10
+HUGE = 1e50
 
 
 def force_tiny(x):
     return np.maximum(x, TINY)
 
 
+def force_finite(x):
+    return np.clip(x, -HUGE, HUGE)
+
+    
 def hdot(x, A):
     return np.dot(x, np.dot(A, x))
 

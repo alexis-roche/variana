@@ -4,7 +4,7 @@ A class to represent unnormalized Gaussian distributions.
 
 import numpy as np
 
-from .utils import (hdot, force_tiny, decomp_sym_matrix)
+from .utils import (force_tiny, force_finite, hdot, decomp_sym_matrix)
 
 
 
@@ -84,8 +84,8 @@ class Gaussian(object):
         dim = m.size
         self._set_dimensions(dim)
         # Mean and variance
-        m = np.nan_to_num(np.reshape(m, (dim,)))
-        V = np.nan_to_num(np.reshape(np.asarray(V), (dim, dim)))
+        m = force_finite(np.reshape(m, (dim,)))
+        V = force_finite(np.reshape(np.asarray(V), (dim, dim)))
         self._dim = dim
         self._m = m
         self._V = V
@@ -151,7 +151,8 @@ class Gaussian(object):
         self._detV = np.prod(inv_s)
         self._sqrtV = np.dot(np.dot(P, np.diag(abs_s ** - .5)), P.T)
         self._m = np.dot(self._V, theta[1:(dim + 1)])
-        self._K = np.exp(theta[0] + .5 * hdot(self._m, invV))
+        #self._K = np.exp(theta[0] + .5 * hdot(self._m, invV))
+        self._K = force_finite(force_tiny(np.exp(theta[0] + .5 * hdot(self._m, invV))))
 
     def rescale(self, c):
         self._K *= c
@@ -299,8 +300,8 @@ class FactorGaussian(object):
         dim = m.size
         self._set_dimensions(dim)
         # Mean and variance
-        m = np.nan_to_num(np.reshape(m, (dim,)))
-        v = np.nan_to_num(np.reshape(v, (dim,)))
+        m = force_finite(np.reshape(m, (dim,)))
+        v = force_finite(np.reshape(v, (dim,)))
         self._dim = dim
         self._m = m
         self._v = force_tiny(v)
@@ -356,7 +357,7 @@ class FactorGaussian(object):
         self._invv = force_tiny(invv)
         self._v = 1 / self._invv
         self._m = self._v * theta[1:(dim + 1)]
-        self._K = force_tiny(np.exp(theta[0] + .5 * np.dot(self._m, self._invv * self._m)))
+        self._K = force_finite(force_tiny(np.exp(theta[0] + .5 * np.dot(self._m, self._invv * self._m))))
         self._detV = np.prod(self._v)
 
     def rescale(self, c):
