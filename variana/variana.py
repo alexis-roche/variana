@@ -142,7 +142,7 @@ class NumEP(object):
 
     def __init__(self, utility, batches, prior, guess=None, niters=1, 
                  gamma2=None, ndraws=None, reflect=None, method='variational',
-                 gradient=None, hessian=None):
+                 gradient=None, hessian=None, step=1e-5):
         """
         Assume: utility = fn(x, i)
         """
@@ -163,7 +163,8 @@ class NumEP(object):
         self.method = method
         self.gradient = gradient
         self.hessian = hessian
-
+        self.step = float(step)  # for finite-difference Laplace
+        
     def _get_gaussian(self):
         return prod_factors([self.prior] + self.approx_factors)
 
@@ -172,7 +173,7 @@ class NumEP(object):
     def cavity(self, a):
         return prod_factors([self.prior] + [self.approx_factors[b] for b in [b for b in self.batches if b != a]])
 	
-    def update_factor(self, a, step=1e-5):
+    def approx_factor(self, a):
         target = lambda x: self.utility(x, a)
         cavity = self.cavity(a)
         if self.method in ('quadrature', 'variational'):
@@ -180,19 +181,23 @@ class NumEP(object):
             prop = v.fit(method=self.method, family=cavity.family).gaussian
         elif self.method == 'laplace':
             if self.gradient is None:
-                g = lambda x: approx_gradient(target, x, step)
+                g = lambda x: approx_gradient(target, x, self.step)
             else:
                 g = lambda x: self.gradient(x, a)
             if self.hessian is None:
                 if cavity.family == 'factor_gaussian':
-                    h = lambda x: approx_hessian_diag(target, x, step)
+                    h = lambda x: approx_hessian_diag(target, x, self.step)
                 else:
-                    h = lambda x: approx_hessian(target, x, step)
+                    h = lambda x: approx_hessian(target, x, self.step)
             else:
                 h = lambda x: self.hessian(x, a)
             prop = laplace_approx(target, g, h, cavity)
         else:
             raise ValueError('not a method I am aware of, sorry')
+        return prop
+
+    def update_factor(self, a):
+        prop = self.approx_factor(a)
         # update factor only if the candidate fit is numerically defined
         if not np.max(np.isinf(prop.theta)):
              self.approx_factors[a] = prop
