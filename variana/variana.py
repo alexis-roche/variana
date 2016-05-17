@@ -142,7 +142,7 @@ class NumEP(object):
 
     def __init__(self, utility, batches, prior, guess=None, niters=1, 
                  gamma2=None, ndraws=None, reflect=None, method='variational',
-                 gradient=None, hessian=None, step=1e-5):
+                 gradient=None, hessian=None, step=1e-5, minimizer='newton'):
         """
         Assume: utility = fn(x, i)
         """
@@ -164,6 +164,9 @@ class NumEP(object):
         self.gradient = gradient
         self.hessian = hessian
         self.step = float(step)  # for finite-difference Laplace
+        self.args = {}
+        if self.method == 'variational':
+            self.args['minimizer'] = minimizer
         
     def _get_gaussian(self):
         return prod_factors([self.prior] + self.approx_factors)
@@ -178,7 +181,7 @@ class NumEP(object):
         cavity = self.cavity(a)
         if self.method in ('quadrature', 'variational'):
             v = Variana(target, cavity, gamma2=self.gamma2, ndraws=self.ndraws, reflect=self.reflect)
-            prop = v.fit(method=self.method, family=cavity.family).gaussian
+            prop = v.fit(method=self.method, family=cavity.family, **self.args).gaussian
         elif self.method == 'laplace':
             if self.gradient is None:
                 g = lambda x: approx_gradient(target, x, self.step)
