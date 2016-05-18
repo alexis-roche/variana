@@ -167,16 +167,21 @@ class NumEP(object):
         self.args = {}
         if self.method == 'variational':
             self.args['minimizer'] = minimizer
+        self._gaussian = prod_factors([self.prior] + self.approx_factors)
         
     def _get_gaussian(self):
-        return prod_factors([self.prior] + self.approx_factors)
+        #return prod_factors([self.prior] + self.approx_factors)
+        return self._gaussian
 
     gaussian = property(_get_gaussian)
 
     def cavity(self, a):
-        return prod_factors([self.prior] + [self.approx_factors[b] for b in [b for b in self.batches if b != a]])
+        #return prod_factors([self.prior] + [self.approx_factors[b] for b in [b for b in self.batches if b != a]])
+        return self._gaussian / self.approx_factors[a]
 	
-    def approx_factor(self, a):
+    def update_factor(self, a):
+
+        # compute a candidate for the factor approximation 
         target = lambda x: self.utility(x, a)
         cavity = self.cavity(a)
         if self.method in ('quadrature', 'variational'):
@@ -197,13 +202,14 @@ class NumEP(object):
             prop = laplace_approx(target, g, h, cavity)
         else:
             raise ValueError('not a method I am aware of, sorry')
-        return prop
 
-    def update_factor(self, a):
-        prop = self.approx_factor(a)
         # update factor only if the candidate fit is numerically defined
-        if not np.max(np.isinf(prop.theta)):
-             self.approx_factors[a] = prop
+        if np.max(np.isinf(prop.theta)):
+            return
+
+        # if candidate accepted, update the overall fit
+        self.approx_factors[a] = prop
+        self._gaussian = cavity * prop
             
     def run(self): 
         for a in self.batches:
