@@ -43,6 +43,7 @@ def inv_sym_matrix(A):
     s, P = eigh(A)
     return np.dot(P * (1 / force_tiny(s)), P.T)
 
+norminf = lambda x: np.max(np.abs(x))
 
 class SteepestDescent(object):
 
@@ -55,7 +56,9 @@ class SteepestDescent(object):
     def _generic_init(self, x, f, grad_f, maxiter, tol,
                       stepsize, adaptive, verbose):
         self.x = np.asarray(x).ravel()
-        self.ref_norm = np.maximum(tol, np.max(np.abs(x)))
+        #self.ref_norm = np.maximum(tol, norminf(x))
+        # debug
+        #print('Tol=%f, ref_norm=%f' % (tol, self.ref_norm))
         self.f = f
         self.grad_f = grad_f
         if maxiter == None:
@@ -82,7 +85,7 @@ class SteepestDescent(object):
 
             # Compute descent direction
             dx = self.direction()
-            dx_norm = np.max(np.abs(dx))
+            dx_norm = norminf(dx)
 
             # Line search
             done = False
@@ -102,7 +105,8 @@ class SteepestDescent(object):
                     a *= 2
                 else:
                     a *= .5
-                    stuck = abs(a * dx_norm) < self.tol * self.ref_norm
+                    #stuck = abs(a * dx_norm) < self.tol * self.ref_norm
+                    stuck = abs(a * dx_norm) < self.tol
                     done = self.fval < fvalN or stuck
 
             # Termination test
