@@ -221,3 +221,61 @@ class NumEP(object):
             self.run()
 
 
+
+class IncrementalEP(object):
+
+    def __init__(self, prior, guess=None, niters=1, 
+                 gamma2=None, ndraws=None, reflect=None, method='variational',
+                 gradient=None, hessian=None, step=1e-5, minimizer='newton'):
+        """
+        Assume: utility = fn(x, i)
+        """
+        self.prior = as_normalized_gaussian(prior)
+        self.dim = self.prior.dim
+        self.niters = niters
+        self.gamma2 = gamma2
+        self.ndraws = ndraws
+        self.reflect = reflect
+        self.method = method
+        self.gradient = gradient
+        self.hessian = hessian
+        self.step = float(step)  # for finite-difference Laplace
+        self.args = {}
+        if self.method == 'variational':
+            self.args['minimizer'] = minimizer
+        self._gaussian = self.prior
+        
+    def _get_gaussian(self):
+        return self._gaussian
+
+    gaussian = property(_get_gaussian)
+
+    def update_factor(self, utility, gradient=None, hessian=None):
+
+        # compute a candidate for the factor approximation 
+        if self.method in ('quadrature', 'variational'):
+            v = Variana(utility, self._gaussian, gamma2=self.gamma2, ndraws=self.ndraws, reflect=self.reflect)
+            prop = v.fit(method=self.method, family=self._gaussian.family, **self.args).gaussian
+        elif self.method == 'laplace':
+            if gradient is None:
+                gradient = lambda x: approx_gradient(utility, x, self.step)
+            if self.hessian is None:
+                if self._gaussian.family == 'factor_gaussian':
+                    hessian = lambda x: approx_hessian_diag(utility, x, self.step)
+            prop = laplace_approx(utility, gradient, hessian, self._gaussian)
+        else:
+            raise ValueError('not a method I am aware of, sorry')
+
+        # update factor only if the candidate fit is numerically defined
+        if np.max(np.isinf(prop.theta)):
+            return
+
+        # if candidate accepted, update the overall fit
+        self._gaussian = self._gaussian * prop
+            
+    def __call__(self):
+        for i in range(self.niters):
+            print('Iteration n. %d/%d' % (i + 1, niters))
+            self.run()
+
+
