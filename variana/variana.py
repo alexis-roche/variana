@@ -3,6 +3,7 @@ Variational sampling
 """
 from time import time
 import numpy as np
+from scipy.optimize import fmin_powell
 
 from .utils import (HUGE, safe_exp, approx_gradient, approx_hessian_diag, approx_hessian)
 from .gaussian import (as_normalized_gaussian, Gaussian, FactorGaussian)
@@ -92,7 +93,7 @@ class Variana(object):
         Parameters
         ----------
         method: str
-          one of 'laplace', 'quadrature' or 'variational'.
+          one of 'laplace', 'quick_laplace', 'quadrature' or 'variational'.
         """
         if method == 'variational':
             return VariationalFit(self, **args)
@@ -119,8 +120,17 @@ def prod_factors(f):
     return out
 
 
-def laplace_approx(u, g, h, cavity):
+def laplace_approx(u, g, h, cavity, optimize=True):
+    """
+    u: loss function -> factor f = exp(-u)
+    g: gradient of u 
+    h: Hessian of u
+    cavity: cavity distribution
+    """
     m = cavity.m
+    if optimize:
+        func = lambda x: u(x) - cavity.log(x.reshape((-1, 1)))
+        m = fmin_powell(func, m, disp=0) 
     dim = len(m)
     u0 = u(m)
     g0 = g(m)
@@ -187,7 +197,7 @@ class NumEP(object):
         if self.method in ('quadrature', 'variational'):
             v = Variana(target, cavity, gamma2=self.gamma2, ndraws=self.ndraws, reflect=self.reflect)
             prop = v.fit(method=self.method, family=cavity.family, **self.args).gaussian
-        elif self.method == 'laplace':
+        elif self.method in ('laplace', 'quick_laplace'):
             if self.gradient is None:
                 g = lambda x: approx_gradient(target, x, self.step)
             else:
@@ -199,7 +209,10 @@ class NumEP(object):
                     h = lambda x: approx_hessian(target, x, self.step)
             else:
                 h = lambda x: self.hessian(x, a)
-            prop = laplace_approx(target, g, h, cavity)
+            if self.method == 'laplace':
+                prop = laplace_approx(target, g, h, cavity, optimize=True)
+            else:
+                prop = laplace_approx(target, g, h, cavity, optimize=False)
         else:
             raise ValueError('not a method I am aware of, sorry')
 
@@ -254,13 +267,16 @@ class IncrementalEP(object):
         if self.method in ('quadrature', 'variational'):
             v = Variana(utility, self._gaussian, gamma2=self.gamma2, ndraws=self.ndraws, reflect=self.reflect)
             prop = v.fit(method=self.method, family=self._gaussian.family, **self.args).gaussian
-        elif self.method == 'laplace':
+        elif self.method in ('laplace', 'quick_laplace'):
             if gradient is None:
                 gradient = lambda x: approx_gradient(utility, x, self.step)
             if hessian is None:
                 if self._gaussian.family == 'factor_gaussian':
                     hessian = lambda x: approx_hessian_diag(utility, x, self.step)
-            prop = laplace_approx(utility, gradient, hessian, self._gaussian)
+            if self.method == 'laplace':
+                prop = laplace_approx(utility, gradient, hessian, self._gaussian, optimize=True)
+            else:
+                prop = laplace_approx(utility, gradient, hessian, self._gaussian, optimize=False)
         else:
             raise ValueError('not a method I am aware of, sorry')
 
