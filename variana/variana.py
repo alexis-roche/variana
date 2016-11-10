@@ -226,7 +226,7 @@ class IncrementalEP(object):
 
     def __init__(self, prior, guess=None, niters=1, 
                  gamma2=None, ndraws=None, reflect=None, method='variational',
-                 gradient=None, hessian=None, step=1e-5, minimizer='newton'):
+                 step=1e-5, minimizer='newton'):
         """
         Assume: utility = fn(x, i)
         """
@@ -237,8 +237,6 @@ class IncrementalEP(object):
         self.ndraws = ndraws
         self.reflect = reflect
         self.method = method
-        self.gradient = gradient
-        self.hessian = hessian
         self.step = float(step)  # for finite-difference Laplace
         self.args = {}
         if self.method == 'variational':
@@ -259,7 +257,7 @@ class IncrementalEP(object):
         elif self.method == 'laplace':
             if gradient is None:
                 gradient = lambda x: approx_gradient(utility, x, self.step)
-            if self.hessian is None:
+            if hessian is None:
                 if self._gaussian.family == 'factor_gaussian':
                     hessian = lambda x: approx_hessian_diag(utility, x, self.step)
             prop = laplace_approx(utility, gradient, hessian, self._gaussian)
