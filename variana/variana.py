@@ -3,7 +3,7 @@ Variational sampling
 """
 from time import time
 import numpy as np
-from scipy.optimize import fmin_powell
+from scipy.optimize import fmin_ncg
 
 from .utils import (HUGE, safe_exp, approx_gradient, approx_hessian_diag, approx_hessian)
 from .gaussian import (as_normalized_gaussian, Gaussian, FactorGaussian)
@@ -129,8 +129,10 @@ def laplace_approx(u, g, h, cavity, optimize=True):
     """
     m = cavity.m
     if optimize:
-        func = lambda x: u(x) - cavity.log(x.reshape((-1, 1)))
-        m = fmin_powell(func, m, disp=0) 
+        f = lambda x: u(x) - cavity.log(x.reshape((-1, 1)))
+        fprime = lambda x: g(x) + (x - cavity.m) / cavity.v
+        fhess_p = lambda x, p: (h(x) + (1 / cavity.v)) * p
+        m = fmin_ncg(f, m, fprime, fhess_p=fhess_p, disp=0) 
     dim = len(m)
     u0 = u(m)
     g0 = g(m)
