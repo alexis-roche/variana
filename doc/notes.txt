@@ -1,0 +1,46 @@
+Equation average EP
+
+Factor approximation g(x)
+
+AEP update: 
+- set context c = g^{n-1}
+- pick a factor fi
+- fit fi in context c --> gi
+  c fi \approx c gi
+- update g:
+  g^n = g^{n-1} gi --> g <- g^{1-1/n} gi^{1/n}
+
+We can provide an alternative equivalent scheme based on the following observations.
+
+On each iteration, the target depends on the factor under consideration: 
+
+pi = c fi
+
+We perform the factor fitting. The resulting target fit is:
+
+qi = c gi
+
+This expression also provides the context update:
+
+g^n = qi 
+==> c = qi^{1-1/n}
+
+Hence, here is an alternative scheme in which the context is available at the beginning of each iteration. Say the context is initially uniform. 
+
+Equivalent AEP update:
+- pick a factor fi
+- fit  pi = c fi with qi
+- update context: c = qi^{1-1/n}
+
+Using the Laplace method, the fitting step can be split in two steps:
+1. compute the Laplace approximation gi of fi at context center
+2. compute qi = c gi
+
+Hence, the Laplace AEP update boils down to:
+- pick a factor fi
+- compute the Taylor expansion of log(fi) at context center --> log(gi)
+- multiply: compute c <- c gi
+- rescale: compute c <- c^{1-1/n}
+
+
+
