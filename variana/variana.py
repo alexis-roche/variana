@@ -6,7 +6,7 @@ import numpy as np
 from scipy.optimize import fmin_ncg
 
 from .utils import (HUGE, safe_exp, approx_gradient, approx_hessian_diag, approx_hessian)
-from .gaussian import (as_normalized_gaussian, Gaussian, FactorGaussian)
+from .gaussian import (as_normalized_gaussian, Gaussian, FactorGaussian, laplace_approximation)
 from .fit import (VariationalFit, QuadratureFit)
 
 
@@ -132,22 +132,8 @@ def laplace_approx(u, g, h, cavity, optimize=True):
         f = lambda x: u(x) - cavity.log(x.reshape((-1, 1)))
         fprime = lambda x: g(x) + (x - cavity.m) / cavity.v
         fhess_p = lambda x, p: (h(x) + (1 / cavity.v)) * p
-        m = fmin_ncg(f, m, fprime, fhess_p=fhess_p, disp=0) 
-    dim = len(m)
-    u0 = u(m)
-    g0 = g(m)
-    a0 = .5 * h(m)
-    am0 = a0 * m
-    theta = np.zeros(2 * dim + 1)
-    theta[0] = u0 -np.dot(g0, m) + np.dot(m.T, am0)
-    theta[1:1+dim] = g0 - 2 * am0
-    theta[1+dim:] = a0
-    if cavity.family == 'factor_gaussian':
-        return FactorGaussian(theta=theta)
-    elif cavity.family == 'gaussian':
-        raise ValueError('not implemented yet, brother')
-    else:
-        raise ValueError('unknown family')
+        m = fmin_ncg(f, m, fprime, fhess_p=fhess_p, disp=0)
+    return laplace_approximation(m, u(m), g(m), h(m))
 
 
 class NumEP(object):

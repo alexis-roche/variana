@@ -503,3 +503,24 @@ def instantiate_family(key, dim):
         raise ValueError('unknown family')
 
 
+def laplace_approximation(m, u, g, h):
+    """
+    m: approximation point
+    u: log function value
+    g: gradient of log function
+    h: Hessian or Hessian diagonal of log function
+    """
+    dim = g.shape[-1]
+    theta = np.zeros(2 * dim + 1)
+    theta[1+dim:] = .5 * h
+    aux = h * m
+    theta[1:1+dim] = g - aux
+    theta[0] = u - np.dot(g, m) + .5 * np.dot(m.T, aux)
+    if h.shape == g.shape:
+        return FactorGaussian(theta=theta)
+    elif h.shape[-2:] == (dim, dim):
+        raise ValueError('Full Gaussian Laplace not implemented yet')
+    else:
+        raise ValueError('unknown family')
+
+
