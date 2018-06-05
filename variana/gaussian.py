@@ -159,8 +159,10 @@ class Gaussian(object):
 
     def mahalanobis(self, xs):
         if xs.ndim == 1:
-            xs = np.reshape(xs, (1, xs.size))
-        ys = (xs.T - self._m).T
+            m = self._m
+        else:
+            m = np.expand_dims(self._m, -1)
+        ys = xs - m
         return np.sum(ys * np.dot(self._invV, ys), 0)
 
     def log(self, xs):
@@ -365,9 +367,12 @@ class FactorGaussian(object):
 
     def mahalanobis(self, xs):
         if xs.ndim == 1:
-            xs = np.reshape(xs, (1, xs.size))
-        ys = (xs.T - self._m).T
-        return np.sum(self._invv * (ys ** 2).T, 1)
+            m = self._m
+            invv = self._invv
+        else:
+            m = np.expand_dims(self._m, -1)
+            invv = np.expand_dims(self._invv, -1)
+        return np.sum(invv * ((xs - m) ** 2), 0)
 
     def log(self, xs):
         return np.log(self._K) - .5 * self.mahalanobis(xs)
