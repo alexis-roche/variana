@@ -6,14 +6,15 @@ from numpy.distutils.core import setup
 
 
 def configuration(parent_package='', top_path=None):
-    config = Configuration(None, parent_package, top_path)
-    config.set_options(
-        ignore_setup_xxx_py=True,
-        assume_default_configuration=True,
-        delegate_options_to_subpackages=True,
-        quiet=True,
-    )
-    config.add_subpackage('variana')
+    config = Configuration('variana', parent_package, top_path)
+    #config.set_options(
+    #    ignore_setup_xxx_py=True,
+    #    assume_default_configuration=True,
+    #    delegate_options_to_subpackages=True,
+    #    quiet=True,
+    #)
+    config.add_data_dir('tests')
+    config.add_subpackage('variational_sampling')
     return config
 
 

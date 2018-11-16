@@ -5,8 +5,8 @@ from time import time
 import numpy as np
 from scipy.optimize import fmin_ncg
 
-from .utils import (HUGE, safe_exp, approx_gradient, approx_hessian_diag, approx_hessian)
-from .gaussian import (as_normalized_gaussian, Gaussian, FactorGaussian, laplace_approximation)
+from ..utils import (HUGE, safe_exp, approx_gradient, approx_hessian_diag, approx_hessian)
+from ..gaussian import (as_normalized_gaussian, Gaussian, FactorGaussian, laplace_approximation)
 from .fit import (VariationalFit, QuadratureFit)
 
 
@@ -23,7 +23,7 @@ def sample_fun(f, x):
         return ff(x).squeeze(), ff
 
 
-class Variana(object):
+class VariationalSampler(object):
 
     def __init__(self, target, cavity, gamma2=None, ndraws=None, reflect=False):
         """Variational sampler class.
@@ -183,7 +183,7 @@ class NumEP(object):
         target = lambda x: self.utility(x, a)
         cavity = self.cavity(a)
         if self.method in ('quadrature', 'variational'):
-            v = Variana(target, cavity, gamma2=self.gamma2, ndraws=self.ndraws, reflect=self.reflect)
+            v = VariantionalSampler(target, cavity, gamma2=self.gamma2, ndraws=self.ndraws, reflect=self.reflect)
             prop = v.fit(method=self.method, family=cavity.family, **self.args).gaussian
         elif self.method in ('laplace', 'quick_laplace'):
             if self.gradient is None:
@@ -214,7 +214,7 @@ class NumEP(object):
             
     def run(self): 
         for a in self.batches:
-	    self.update_factor(a)
+            self.update_factor(a)
 
     def __call__(self):
         for i in range(self.niters):
@@ -253,7 +253,7 @@ class IncrementalEP(object):
 
         # compute a candidate for the factor approximation 
         if self.method in ('quadrature', 'variational'):
-            v = Variana(utility, self._gaussian, gamma2=self.gamma2, ndraws=self.ndraws, reflect=self.reflect)
+            v = VariationalSampler(utility, self._gaussian, gamma2=self.gamma2, ndraws=self.ndraws, reflect=self.reflect)
             prop = v.fit(method=self.method, family=self._gaussian.family, **self.args).gaussian
         elif self.method in ('laplace', 'quick_laplace'):
             if gradient is None:

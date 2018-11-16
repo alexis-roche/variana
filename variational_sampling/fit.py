@@ -1,8 +1,8 @@
 from time import time
 import numpy as np
 
-from .utils import (inv_sym_matrix, min_methods)
-from .gaussian import instantiate_family
+from ..utils import (inv_sym_matrix, min_methods)
+from ..gaussian import instantiate_family
 
 VERBOSE = False
 

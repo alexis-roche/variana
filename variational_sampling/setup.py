@@ -3,7 +3,7 @@ from numpy.distutils.misc_util import Configuration
 
 
 def configuration(parent_package='', top_path=None):
-    config = Configuration('variana', parent_package, top_path)
+    config = Configuration('variational_sampling', parent_package, top_path)
     config.add_data_dir('tests')
     return config
 

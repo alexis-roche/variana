@@ -353,7 +353,7 @@ class FactorGaussian(object):
 
     def _set_theta(self, theta):
         theta = np.asarray(theta)
-        dim = (theta.size - 1) / 2
+        dim = (theta.size - 1) // 2
         self._set_dimensions(dim)
         invv = -2 * theta[(dim + 1):]
         self._invv = force_tiny(invv)
