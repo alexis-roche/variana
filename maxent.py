@@ -2,7 +2,7 @@ import numpy as np
 import scipy.optimize as spo
 
 ##from .utils import safe_exp
-from .utils import min_methods
+from .utils import min_methods, CachedFunction
 
 VERBOSE = True
 
@@ -28,7 +28,6 @@ psi(w) = w int p_w f + int pi - int p_w - w int p_w f + w F
 
 """
 
-
 class MaxentModel(object):
 
     def __init__(self, dim, functions, values):
@@ -48,47 +47,43 @@ class MaxentModel(object):
         self._fx = np.concatenate((np.ones((dim, 1)), tmp), axis=1)
         self._values = np.concatenate(([1.], values))
         self._w = np.zeros(self._fx.shape[1])
-        
-    def _dist(self, w):
+        self._dist = CachedFunction(self.__dist)
+        self._dist_fx = CachedFunction(self.__dist_fx)
+
+    def __dist(self, w):
         return self._prior * np.exp(np.dot(self._fx, w))
+       
+    def __dist_fx(self, w):
+        return np.expand_dims(self._dist(w), 1) * self._fx
 
     def dist(self):
         return self._dist(self._w)
+    
+    def dual(self, w):
+        return np.dot(w, self._values) - np.sum(self._dist(w)) + 1
 
-    def dual_and_derivatives(self, w):
-        d = self._dist(w)        
-        z = np.sum(d)
-        aux = np.expand_dims(d, 1) * self._fx
-        return np.dot(w, self._values) - z + 1, \
-            self._values - np.sum(aux, 0), \
-            -np.dot(aux.T, self._fx)
+    def gradient_dual(self, w):
+        return self._values - np.sum(self._dist_fx(w), 0)
+
+    def hessian_dual(self, w):
+        return -np.dot(self._dist_fx(w).T, self._fx)
 
     def fit(self, method='newton', maxiter=None, tol=1e-5):
         cache = {'w': None, 'f': None, 'g': None, 'h': None}
 
         def cost(w):
-            if w is cache['w']:
-                return cache['f']
-            f, g, h = self.dual_and_derivatives(w)
-            f, g, h = -f, -g, -h
-            cache['w'] = w
-            cache['f'] = f
-            cache['g'] = g
-            cache['h'] = h
-            return f
+            return -self.dual(w)
             
-        def grad_cost(w):
-            if not w is cache['w']:
-                f = cost(w)
-            return cache['g']
+        def gradient_cost(w):
+            return -self.gradient_dual(w)
+        
+        def hessian_cost(w):
+            return -self.hessian_dual(w)
 
-        def grad_hess(w):
-            if not w is cache['w']:
-                f = cost(w)
-            return cache['h']
-
-        m = min_methods[method](self._w, cost, grad_cost, grad_hess,
+        m = min_methods[method](self._w, cost, gradient_cost, hessian_cost,
                                 maxiter=maxiter, tol=tol,
                                 verbose=VERBOSE)
         self._w = m.argmin()
         
+
+

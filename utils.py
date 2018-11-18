@@ -375,3 +375,16 @@ def approx_hessian(f, x, epsilon):
         ei[i] = 0
     return H.squeeze()
 
+
+class CachedFunction(object):
+
+    def __init__(self, fun):
+        self._x = None
+        self._f = None
+        self._fun = fun
+
+    def __call__(self, x):
+        if not self._x is x:
+            self._x = x
+            self._f = self._fun(x)
+        return self._f
