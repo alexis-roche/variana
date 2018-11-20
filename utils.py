@@ -2,6 +2,8 @@
 Constants used in several modules.
 Basic implementation of Gauss-Newton gradient descent scheme.
 """
+from ._utils import _sdot
+
 from time import time
 from warnings import warn
 import numpy as np
@@ -388,3 +390,8 @@ class CachedFunction(object):
             self._x = x
             self._f = self._fun(x)
         return self._f
+
+
+def sdot(A, B):
+    return _sdot(A.astype(np.double), B.astype(np.double))
+

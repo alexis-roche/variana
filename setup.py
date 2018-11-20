@@ -15,6 +15,7 @@ def configuration(parent_package='', top_path=None):
     #)
     config.add_data_dir('tests')
     config.add_subpackage('variational_sampling')
+    config.add_extension('_utils', sources=['_utils.c'])   
     return config
 
 
