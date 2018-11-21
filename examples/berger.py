@@ -1,30 +1,36 @@
 from variana.maxent import *
 
-def f1(x):
-    return x < 2
+def fun(x, i):
+    if i == 0:
+        return x < 2        
+    elif i == 1:
+        return x in (0, 2)
 
-def f2(x):
-    return x in (0, 2)
 
-
-m = MaxentModel(5, (f1, f2), (0.3, 0.5))
+m = MaxentModel(5, fun, (.3, .5))
 m.fit()
 p = m.dist()
+print(m.weights)
 
-m2 = MaxentModelGKL(5, (f1, f2), (0.3, 0.5))
+m2 = MaxentModelGKL(5, fun, (.3, .5))
 m2.fit()
 p2 = m2.dist()
+print(m2.weights)
 
-F1 = lambda x, y: f1(x)
-F2 = lambda x, y: f2(x)
-Y =  (0, 1, 0, 1, 0, 1, 0, 1)
-m3 = ConditionalMaxentModel(5, (F1, F2), (.3, .5), Y)
+data =  (0, 1, 0, 1, 0, 1, 0, 1)
+m3 = ConditionalMaxentModel(5, lambda x, y, i: fun(x, i), (.3, .5), data)
 m3.fit()
 p3 = m3.dist(0)
+print(m3.weights)
 
-FF1 = lambda x, y: f1(x) * abs(1 - 2*y) 
-FF2 = lambda x, y: f2(x) * abs(1 - 2*y)
-
-m4 = ConditionalMaxentModel(5, (FF1, FF2), (.3, .5), Y)
+m4 = ConditionalMaxentModel(5, lambda x, y, i: fun(x, i) * abs(1 - 2*y), (.3, .5), data)
 m4.fit()
 p4 = m4.dist(0)
+print(m4.weights)
+
+
+data2 = np.random.rand(100)
+m5 = ConditionalMaxentModel(5, lambda x, y, i: fun(x, i) * abs(1 - 2*y), (.3, .5), data2)
+m5.fit()
+p5 = m5.dist(0)
+print(m5.weights)
