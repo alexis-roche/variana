@@ -1,7 +1,7 @@
 import numpy as np
 import scipy.optimize as spo
 
-from .utils import sdot, min_methods, CachedFunction, TINY, safe_exp
+from .utils import sdot, min_methods, CachedFunction, force_tiny, safe_exp
 
 VERBOSE = True
 
@@ -128,7 +128,7 @@ class MaxentModel(object):
 
     def __z(self, w):
         udist, norma = self._udist(w)
-        return np.maximum(np.sum(udist), TINY), norma
+        return force_tiny(np.sum(udist)), norma
 
     def __gradient_z(self, w):
         return np.sum(self._udist_fx(w), 0)
@@ -212,7 +212,7 @@ class ConditionalMaxentModel(MaxentModel):
 
     def __z(self, w):
         udist, norma = self._udist(w)
-        return np.maximum(np.sum(udist, 1), TINY), norma
+        return force_tiny(np.sum(udist, 1)), norma
 
     def __gradient_z(self, w):
         return np.sum(self._udist_fxy(w), 1)
@@ -242,10 +242,11 @@ class ConditionalMaxentModel(MaxentModel):
         if y is None:
             udist, _ = self._udist(self._w)
             return udist / np.sum(udist, 1)[:, None]            
-        fx = np.array([[self._basis(x, y, i) for i in range(len(self._moments))] for x in range(len(self._prior))])
-        udist, _ = safe_exp(np.dot(fx, w))
-        p = self._prior * udist
-        return p / np.maximum(np.sum(p), TINY)
+        fx = np.array([[self._basis(x, y, i)\
+                        for i in range(len(self._moments))]\
+                       for x in range(len(self._prior))])
+        p = self._prior * safe_exp(np.dot(fx, w))[0]
+        return p / force_tiny(np.sum(p))
 
 
 
