@@ -12,7 +12,6 @@ moments = [.6, .3]
 
 m = MaxentModel(6, basis, moments)
 m.fit()
-
 pdist = m.dist()
 
 print('Weights: %s' % m.weights)

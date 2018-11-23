@@ -72,7 +72,7 @@ else:
 basis = lambda x, y, i: log_lik1d(y[i], means[x, i], devs[x, i])
 moments = np.mean(mean_log_lik1d(devs[labels]), 0)
 m = ConditionalMaxentModel(2, basis, moments, data)
-m.fit()
+m.fit(positive_weights=True)
 
 
 ###################

@@ -1,7 +1,7 @@
 from time import time
 import numpy as np
 
-from ..utils import (inv_sym_matrix, min_methods)
+from ..utils import (minimizer, inv_sym_matrix)
 from ..gaussian import instantiate_family
 
 VERBOSE = False
@@ -144,16 +144,14 @@ class VariationalFit(object):
         """
         theta = self._theta_init
         meth = self.minimizer
-        if meth not in min_methods.keys():
-            raise ValueError('unknown minimizer')
         if meth == 'quasi_newton':
             hessian = self._pseudo_hessian()
         else:
             hessian = self._hessian
-        m = min_methods[meth](theta, self._loss, self._gradient,
-                              hessian,
-                              maxiter=self.maxiter, tol=self.tol,
-                              verbose=VERBOSE)
+        m = minimizer(meth, theta, self._loss, self._gradient,
+                      hessian,
+                      maxiter=self.maxiter, tol=self.tol,
+                      verbose=VERBOSE)
         if VERBOSE:
             m.message()
         self._theta = m.argmin()

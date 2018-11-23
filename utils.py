@@ -45,24 +45,25 @@ def inv_sym_matrix(A):
     s, P = eigh(A)
     return np.dot(P * (1 / force_tiny(s)), P.T)
 
-norminf = lambda x: np.max(np.abs(x))
+
+def norminf(x):
+    return np.max(np.abs(x))
+
 
 class SteepestDescent(object):
 
     def __init__(self, x, f, grad_f, hess_f=None,
                  maxiter=None, tol=1e-7,
                  stepsize=1., adaptive=True,
+                 proj=None,
                  verbose=False):
         self._generic_init(x, f, grad_f, maxiter, tol,
-                           stepsize, adaptive, verbose)
+                           stepsize, adaptive, proj, verbose)
         self.run()
 
     def _generic_init(self, x, f, grad_f, maxiter, tol,
-                      stepsize, adaptive, verbose):
+                      stepsize, adaptive, proj, verbose):
         self.x = np.asarray(x).ravel()
-        #self.ref_norm = np.maximum(tol, norminf(x))
-        # debug
-        #print('Tol=%f, ref_norm=%f' % (tol, self.ref_norm))
         self.f = f
         self.grad_f = grad_f
         if maxiter == None:
@@ -75,6 +76,10 @@ class SteepestDescent(object):
         self.nevals = 1
         self.a = stepsize
         self.adaptive = adaptive
+        if proj is None:
+            self.proj = lambda x: x
+        else:
+            self.proj = proj
         self.verbose = verbose
 
     def direction(self):
@@ -96,7 +101,7 @@ class SteepestDescent(object):
             stuck = False
             a = self.a
             while not done:
-                x = np.nan_to_num(xN + a * dx)
+                x = np.nan_to_num(self.proj(xN + a * dx))
                 if not self.adaptive:
                     self.x = x
                     break
@@ -137,9 +142,11 @@ class ConjugateDescent(SteepestDescent):
     def __init__(self, x, f, grad_f, hess_f=None,
                  maxiter=None, tol=1e-7,
                  stepsize=1., adaptive=True,
+                 proj=None,
                  verbose=False):
         self._generic_init(x, f, grad_f, maxiter, tol,
-                           stepsize, adaptive, verbose)
+                           stepsize, adaptive, proj,
+                           verbose)
         self.prev_dx = None
         self.prev_g = None
         self.run()
@@ -167,9 +174,11 @@ class NewtonDescent(SteepestDescent):
     def __init__(self, x, f, grad_f, hess_f,
                  maxiter=None, tol=1e-7,
                  stepsize=1., adaptive=True,
+                 proj=None,
                  verbose=False):
         self._generic_init(x, f, grad_f, maxiter, tol,
-                           stepsize, adaptive, verbose)
+                           stepsize, adaptive, proj,
+                           verbose)
         self.hess_f = hess_f
         self.run()
 
@@ -198,12 +207,14 @@ class QuasiNewtonDescent(SteepestDescent):
     def __init__(self, x, f, grad_f, hess_f,
                  maxiter=None, tol=1e-7,
                  stepsize=1., adaptive=True,
+                 proj=None,
                  verbose=False):
         """
         Assume fix hessian
         """
         self._generic_init(x, f, grad_f, maxiter, tol,
-                           stepsize, adaptive, verbose)
+                           stepsize, adaptive, proj,
+                           verbose)
         self.Hinv = inv_sym_matrix(hess_f)
         self.run()
 
@@ -270,13 +281,28 @@ class ScipyBFGS(object):
         print('Scipy BFGS quasi-Newton implementation')
 
 
-min_methods = {'steepest': SteepestDescent,
+def minimizer(name, x, f, grad_f, hess_f=None,
+              maxiter=None, tol=1e-7,
+              stepsize=1., adaptive=True, proj=None,
+              verbose=False):
+    """
+    name must be one of 'steepest', 'conjugate', 'newton', 'quasi_newton', 'cg', 'ncg', 'bfgs'
+    """
+    min_obj = {'steepest': SteepestDescent,
                'conjugate': ConjugateDescent,
                'newton': NewtonDescent,
                'quasi_newton': QuasiNewtonDescent,
                'cg': ScipyCG,
                'ncg': ScipyNCG,
                'bfgs': ScipyBFGS}
+
+    if name not in min_obj.keys():
+        raise ValueError('unknown minimizer')
+    elif name in ('cg', 'ncg', 'bfgs'):
+        return min_obj[name](x, f, grad_f, hess_f=hess_f, maxiter=maxiter, tol=tol, verbose=verbose)
+    else:
+        return min_obj[name](x, f, grad_f, hess_f=hess_f, maxiter=maxiter, tol=tol,
+                             stepsize=stepsize, adaptive=adaptive, proj=proj, verbose=verbose)
 
 
 def approx_gradient(f, x, epsilon):

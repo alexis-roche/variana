@@ -1,90 +1,9 @@
 import numpy as np
 import scipy.optimize as spo
 
-from .utils import sdot, min_methods, CachedFunction, force_tiny, safe_exp
+from .utils import sdot, minimizer, CachedFunction, force_tiny, safe_exp
 
-VERBOSE = True
 
-"""
-Use the generalized KL divergence.
-
-D(p||pi) = int [p log(p/pi) + pi - p]
-
-L(p, w) = D(p||pi) - w (int pf - F)
-
-=> log(p/pi) + 1 - 1 - w f = 0
-=> log(p/pi) = w f
-=> p_w = pi exp(w f)
-
-Note: f0 = 1 and F0 = 1 by convention.
-
-DUAL FUNCTION
-
-psi(w) = w int p_w f + int pi - int p_w - w int p_w f + w F
-=> psi(w) = w F - int p_w + int pi
-=> grad_psi(w) = F - int p_w f
-=> hess_psi(w) = - int p_w ff'
-
-"""
-
-class MaxentModelGKL(object):
-
-    def __init__(self, dim, basis, moments):
-        """
-        dim is an integer or an array-like reperesenting the prior
-        basis is a function of label, data, feature index
-        moments is a sequence of moments corresponding to basis
-        """
-        if isinstance(dim, int):
-            self._prior = np.ones(dim)
-        else:
-            self._prior = np.asarray(prior)
-        self._prior /= np.sum(self._prior)
-        self._fx = np.array([[1] + [basis(x, i) for i in range(len(moments))] for x in range(len(self._prior))])
-        self._moments = np.concatenate(([1.], moments))
-        self._w = np.zeros(self._fx.shape[-1])
-        self._dist = CachedFunction(self.__dist)
-        self._dist_fx = CachedFunction(self.__dist_fx)
-
-    def __dist(self, w):
-        return self._prior * np.exp(np.dot(self._fx, w))
-       
-    def __dist_fx(self, w):
-        return self._dist(w)[:, None] * self._fx
-
-    def dist(self):
-        return self._dist(self._w)
-    
-    def dual(self, w):
-        return np.dot(w, self._moments) - np.sum(self._dist(w)) + 1
-
-    def gradient_dual(self, w):
-        return self._moments - np.sum(self._dist_fx(w), 0)
-
-    def hessian_dual(self, w):
-        return -np.dot(self._dist_fx(w).T, self._fx)
-
-    def fit(self, w=None, method='newton', maxiter=None, tol=1e-5):
-
-        def cost(w):
-            return -self.dual(w)
-            
-        def gradient_cost(w):
-            return -self.gradient_dual(w)
-        
-        def hessian_cost(w):
-            return -self.hessian_dual(w)
-                    
-        if not w is None:
-            self._w = w
-        m = min_methods[method](self._w, cost, gradient_cost, hessian_cost,
-                                maxiter=maxiter, tol=tol,
-                                verbose=VERBOSE)
-        self._w = m.argmin()
-
-    @property
-    def weights(self):
-        return self._w
 
         
 class MaxentModel(object):
@@ -149,22 +68,18 @@ class MaxentModel(object):
         g = self._gradient_z(w)[:, None]
         return -self._hessian_z(w) / z + np.dot(g, g.T) / (z  ** 2)
 
-    def fit(self, w=None, method='newton', maxiter=None, tol=1e-5):
-
-        def cost(w):
-            return -self.dual(w)
-            
-        def gradient_cost(w):
-            return -self.gradient_dual(w)
-        
-        def hessian_cost(w):
-            return -self.hessian_dual(w)
-
-        if not w is None:
-            self._w = np.asarray(w)
-        m = min_methods[method](self._w, cost, gradient_cost, hessian_cost,
-                                maxiter=maxiter, tol=tol,
-                                verbose=VERBOSE)
+    def fit(self, method='newton', positive_weights=False, weights=None, **kwargs):
+        if not weights is None:
+            self._w = np.asarray(weights)
+        f = lambda w: -self.dual(w)
+        grad_f = lambda w: -self.gradient_dual(w)
+        hess_f = lambda w: -self.hessian_dual(w)
+        if positive_weights:
+            proj = lambda w: (w >= 0) * w
+            self._w = proj(self._w)
+        else:
+            proj = None
+        m = minimizer(method, self._w, f, grad_f, hess_f, proj=proj, **kwargs)
         self._w = m.argmin()
         
     def dist(self):
@@ -250,3 +165,89 @@ class ConditionalMaxentModel(MaxentModel):
 
 
 
+##################################
+# Obsolete, kept for testing
+##################################
+
+"""
+Use the generalized KL divergence.
+
+D(p||pi) = int [p log(p/pi) + pi - p]
+
+L(p, w) = D(p||pi) - w (int pf - F)
+
+=> log(p/pi) + 1 - 1 - w f = 0
+=> log(p/pi) = w f
+=> p_w = pi exp(w f)
+
+Note: f0 = 1 and F0 = 1 by convention.
+
+DUAL FUNCTION
+
+psi(w) = w int p_w f + int pi - int p_w - w int p_w f + w F
+=> psi(w) = w F - int p_w + int pi
+=> grad_psi(w) = F - int p_w f
+=> hess_psi(w) = - int p_w ff'
+
+"""
+
+class MaxentModelGKL(object):
+
+    def __init__(self, dim, basis, moments):
+        """
+        dim is an integer or an array-like reperesenting the prior
+        basis is a function of label, data, feature index
+        moments is a sequence of moments corresponding to basis
+        """
+        if isinstance(dim, int):
+            self._prior = np.ones(dim)
+        else:
+            self._prior = np.asarray(prior)
+        self._prior /= np.sum(self._prior)
+        self._fx = np.array([[1] + [basis(x, i) for i in range(len(moments))] for x in range(len(self._prior))])
+        self._moments = np.concatenate(([1.], moments))
+        self._w = np.zeros(self._fx.shape[-1])
+        self._dist = CachedFunction(self.__dist)
+        self._dist_fx = CachedFunction(self.__dist_fx)
+
+    def __dist(self, w):
+        return self._prior * np.exp(np.dot(self._fx, w))
+       
+    def __dist_fx(self, w):
+        return self._dist(w)[:, None] * self._fx
+
+    def dist(self):
+        return self._dist(self._w)
+    
+    def dual(self, w):
+        return np.dot(w, self._moments) - np.sum(self._dist(w)) + 1
+
+    def gradient_dual(self, w):
+        return self._moments - np.sum(self._dist_fx(w), 0)
+
+    def hessian_dual(self, w):
+        return -np.dot(self._dist_fx(w).T, self._fx)
+
+    def fit(self, method='newton', weights=None, **kwargs):
+
+        def cost(w):
+            return -self.dual(w)
+            
+        def gradient_cost(w):
+            return -self.gradient_dual(w)
+        
+        def hessian_cost(w):
+            return -self.hessian_dual(w)
+                    
+        if not weights is None:
+            self._w = np.asarray(w)
+        m = minimizer(method, self._w, cost, gradient_cost, hessian_cost, **kwargs)
+        self._w = m.argmin()
+
+    @property
+    def weights(self):
+        return self._w
+
+    @property
+    def prior(self):
+        return self._prior
