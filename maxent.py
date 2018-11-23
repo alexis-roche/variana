@@ -95,19 +95,29 @@ class MaxentModel(object):
                 basis is a function of label, data, feature index
         moments is a sequence of moments corresponding to basis 
         """
+        self._init_model(dim, basis, moments)
+        self._init_optimizer()
+
+    def _init_model(self, dim, basis, moments, data=None):
         if isinstance(dim, int):
             self._prior = np.ones(dim)
         else:
             self._prior = np.asarray(prior)
         self._prior /= np.sum(self._prior)
-        self._fx = np.array([[basis(x, i) for i in range(len(moments))] for x in range(len(self._prior))])
+        self._basis = basis
         self._moments = moments
+        self._data = data
         self._w = np.zeros(len(moments))
+        
+    def _init_optimizer(self):
+        self._fx = np.array([[self._basis(x, i)\
+                              for i in range(len(self._moments))]\
+                             for x in range(len(self._prior))])
         self._udist = CachedFunction(self.__udist)
         self._udist_fx = CachedFunction(self.__udist_fx)
         self._z = CachedFunction(self.__z)
         self._gradient_z = CachedFunction(self.__gradient_z)
-
+        
     def __udist(self, w):
         udist, norma = safe_exp(np.dot(self._fx, w))
         return self._prior * udist, norma
@@ -170,7 +180,7 @@ class MaxentModel(object):
         return self._prior
 
 
-class ConditionalMaxentModel(object):
+class ConditionalMaxentModel(MaxentModel):
 
     def __init__(self, dim, basis, moments, data):
         """
@@ -179,15 +189,14 @@ class ConditionalMaxentModel(object):
         moments is a sequence of moments corresponding to basis 
         data is array-like with shape (number of examples, number of features)
         """
-        if isinstance(dim, int):
-            self._prior = np.ones(dim)
-        else:
-            self._prior = np.asarray(prior)
-        self._prior /= np.sum(self._prior)
-        self._basis = basis
-        self._fxy = np.array([[[basis(x, y, i) for i in range(len(moments))] for x in range(len(self._prior))] for y in data])
-        self._moments = moments
-        self._w = np.zeros(len(moments))
+        self._init_model(dim, basis, moments, data=data)
+        self._init_optimizer()
+        
+    def _init_optimizer(self):
+        self._fxy = np.array([[[self._basis(x, y, i)\
+                                for i in range(len(self._moments))]\
+                               for x in range(len(self._prior))]\
+                              for y in self._data])
         self._udist = CachedFunction(self.__udist)
         self._udist_fxy = CachedFunction(self.__udist_fxy)
         self._z = CachedFunction(self.__z)
@@ -226,25 +235,7 @@ class ConditionalMaxentModel(object):
         Gn2 = sdot(gn[:, :, None], gn[:, None, :])       
         Hn = self._hessian_z(w) / z[:, None, None]
         return np.mean(-Hn + Gn2, 0)
-        
-    def fit(self, w=None, method='newton', maxiter=None, tol=1e-5):
-
-        def cost(w):
-            return -self.dual(w)
-            
-        def gradient_cost(w):
-            return -self.gradient_dual(w)
-        
-        def hessian_cost(w):
-            return -self.hessian_dual(w)
-
-        if not w is None:
-            self._w = np.asarray(w)
-        m = min_methods[method](self._w, cost, gradient_cost, hessian_cost,
-                                maxiter=maxiter, tol=tol,
-                                verbose=VERBOSE)
-        self._w = m.argmin()
-        
+                
     def dist(self, y=None, w=None):
         if w is None:
             w = self._w
@@ -256,12 +247,5 @@ class ConditionalMaxentModel(object):
         p = self._prior * udist
         return p / np.maximum(np.sum(p), TINY)
 
-    @property
-    def weights(self):
-        return self._w
-
-    @property
-    def prior(self):
-        return self._prior
 
 
