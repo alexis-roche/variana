@@ -68,7 +68,7 @@ class MaxentModel(object):
         g = self._gradient_z(w)[:, None]
         return -self._hessian_z(w) / z + np.dot(g, g.T) / (z  ** 2)
 
-    def fit(self, method='newton', positive_weights=False, weights=None, **kwargs):
+    def fit(self, method='ncg', positive_weights=False, weights=None, **kwargs):
         if not weights is None:
             self._w = np.asarray(weights)
         f = lambda w: -self.dual(w)
@@ -228,7 +228,7 @@ class MaxentModelGKL(object):
     def hessian_dual(self, w):
         return -np.dot(self._dist_fx(w).T, self._fx)
 
-    def fit(self, method='newton', weights=None, **kwargs):
+    def fit(self, method='ncg', weights=None, **kwargs):
 
         def cost(w):
             return -self.dual(w)
