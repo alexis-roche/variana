@@ -10,16 +10,27 @@ import numpy as np
 from scipy.linalg import cho_factor, cho_solve, eigh
 from scipy.optimize import fmin_cg, fmin_ncg, fmin_bfgs
 
-TINY = 1e-10
-HUGE = 1e50
+_TINY = 1e-10
+_HUGE = 1e50
+
+def probe_time(func):
+    def wrapper(x):
+        t0 = time()
+        res = func(x)
+        dt = time() - t0
+        if res is None:
+            return dt
+        else:
+            return dt, res
+    return wrapper
 
 
 def force_tiny(x):
-    return np.maximum(x, TINY)
+    return np.maximum(x, _TINY)
 
 
 def force_finite(x):
-    return np.clip(x, -HUGE, HUGE)
+    return np.clip(x, -_HUGE, _HUGE)
 
     
 def hdot(x, A):
@@ -50,6 +61,20 @@ def norminf(x):
     return np.max(np.abs(x))
 
 
+def to_float(x):
+    if x is None:
+        return None
+    else:
+        return float(x)
+
+
+def to_int(x):
+    if x is None:
+        return None
+    else:
+        return int(x)
+
+
 class SteepestDescent(object):
 
     def __init__(self, x, f, grad_f, hess_f=None,
@@ -57,84 +82,100 @@ class SteepestDescent(object):
                  stepsize=1., adaptive=True,
                  proj=None,
                  verbose=False):
-        self._generic_init(x, f, grad_f, maxiter, tol,
-                           stepsize, adaptive, proj, verbose)
+
+        self._generic_init('steepest',
+                           x, f, grad_f, None,
+                           maxiter, tol,
+                           stepsize, adaptive, proj,
+                           verbose)
         self.run()
 
-    def _generic_init(self, x, f, grad_f, maxiter, tol,
-                      stepsize, adaptive, proj, verbose):
-        self.x = np.asarray(x).ravel()
-        self.f = f
-        self.grad_f = grad_f
-        if maxiter == None:
-            maxiter = np.inf
-        self.maxiter = maxiter
-        self.tol = tol
-        self.fval = self.f(self.x)
-        self.fval0 = self.fval
-        self.iter = 0
-        self.nevals = 1
-        self.a = stepsize
-        self.adaptive = adaptive
+    def _generic_init(self, name,
+                      x, f, grad_f, hess_f,
+                      maxiter, tol,
+                      stepsize, adaptive, proj,
+                      verbose):
+        self._name = name
+        self._x = np.asarray(x).ravel()
+        self._f = f
+        self._grad_f = grad_f
+        self._hess_f = hess_f
+        self._fval = self._f(self._x)
+        self._init_fval = self._fval
+        self._evals = np.array((1, 0, 0))
+        self._iterations = 0
+        self._maxiter = to_int(maxiter)
+        self._tol = to_float(tol)
+        self._stepsize = to_float(stepsize)
+        self._adaptive = bool(adaptive)
         if proj is None:
-            self.proj = lambda x: x
+            self._proj = lambda x: x
         else:
-            self.proj = proj
-        self.verbose = verbose
+            self._proj = proj
+        self._verbose = verbose
 
     def direction(self):
-        return np.nan_to_num(-self.grad_f(self.x))
+        dx = np.nan_to_num(-self._grad_f(self._x))
+        self._evals[1] += 1
+        return dx
 
     def run(self):
-        t0 = time()
-        while self.iter < self.maxiter:
-            # Evaluate function at current point
-            xN = self.x
-            fvalN = self.fval
+        self._time = self._run()
+        if self._verbose:
+            print(self)
+    
+    @probe_time
+    def _run(self):
 
-            # Compute descent direction
+        stuck = False
+        while not stuck:
+
+            x0 = self._x
+            fval0 = self._fval
             dx = self.direction()
-            dx_norm = norminf(dx)
+            norm_dx = norminf(dx)
 
             # Line search
-            done = False
-            stuck = False
-            a = self.a
+            a = self._stepsize
+            done, lucky = False, False
             while not done:
-                x = np.nan_to_num(self.proj(xN + a * dx))
-                if not self.adaptive:
-                    self.x = x
-                    break
-                fval = self.f(x)
-                self.nevals += 1
-                if fval < self.fval:
-                    self.fval = fval
-                    self.x = x
-                    self.a = a
+                stuck = (a * norm_dx) < self._tol
+                x = np.nan_to_num(self._proj(x0 + a * dx))
+                fval = self._f(x)
+                self._evals[0] += 1
+                if fval < self._fval:
+                    lucky = True
+                    self._x = x
+                    self._fval = fval
+                    if self._adaptive:
+                        self._stepsize = a
                     a *= 2
-                else:
-                    a *= .5
-                    #stuck = abs(a * dx_norm) < self.tol * self.ref_norm
-                    stuck = abs(a * dx_norm) < self.tol
-                    done = self.fval < fvalN or stuck
-
-            # Termination test
-            self.iter += 1
-            if self.verbose:
-                print ('Iter:%d, f=%f, a=%f' % (self.iter, self.fval, self.a))
-            if self.iter > self.maxiter or stuck:
-                break
-
-        self.time = time() - t0
+                else:  # no more lucky
+                    if lucky:
+                        done = True
+                    a /= 2
+                if stuck:
+                    break
+                
+            # Increase iteration number
+            self._iterations += 1
+            if not self._maxiter is None:
+                if self._iterations > self._maxiter:
+                    break
 
     def argmin(self):
-        return self.x
+        return self._x
 
-    def message(self):
-        print('Number of iterations: %d' % self.iter)
-        print('Number of function evaluations: %d' % self.nevals)
-        print('Minimum criterion value: %f' % self.fval)
-        print('Optimization time: %f' % self.time)
+    def __str__(self):
+        return 'Optimization complete (%s method).\n' % self._name \
+            + ' Initial function value: %f\n' % self._init_fval\
+            + ' Final function value: %f\n' % self._fval\
+            + ' Iterations: %d\n' % self._iterations\
+            + ' Function evaluations: %d\n' % self._evals[0]\
+            + ' Gradient evaluations: %d\n' % self._evals[1]\
+            + ' Hessian evaluations: %d\n' % self._evals[2]\
+            + ' Optimization time: %f sec\n' % self._time\
+            + ' Final step size: %f\n' % self._stepsize
 
 
 class ConjugateDescent(SteepestDescent):
@@ -144,28 +185,31 @@ class ConjugateDescent(SteepestDescent):
                  stepsize=1., adaptive=True,
                  proj=None,
                  verbose=False):
-        self._generic_init(x, f, grad_f, maxiter, tol,
+        self._generic_init('conjugate',
+                           x, f, grad_f, None,
+                           maxiter, tol,
                            stepsize, adaptive, proj,
                            verbose)
-        self.prev_dx = None
-        self.prev_g = None
+        self._prev_dx = None
+        self._prev_g = None
         self.run()
-
+        
     def direction(self):
         """
         Polak-Ribiere rule. Reset direction if beta < 0 or if
         objective increases along proposed direction.
         """
-        g = self.grad_f(self.x)
-        if self.prev_dx == None:
+        g = self._grad_f(self._x)
+        self._evals[1] += 1
+        if self._prev_dx is None:
             dx = -g
         else:
-            b = max(0, np.dot(g, g - self.prev_g) / np.sum(self.prev_g ** 2))
-            dx = -g + b * self.prev_dx
+            b = max(0, np.dot(g, g - self._prev_g) / np.sum(self._prev_g ** 2))
+            dx = -g + b * self._prev_dx
             if np.dot(dx, g) > 0:
                 dx = -g
-        self.prev_g = g
-        self.prev_dx = dx
+        self._prev_g = g
+        self._prev_dx = dx
         return np.nan_to_num(dx)
 
 
@@ -176,12 +220,13 @@ class NewtonDescent(SteepestDescent):
                  stepsize=1., adaptive=True,
                  proj=None,
                  verbose=False):
-        self._generic_init(x, f, grad_f, maxiter, tol,
+        self._generic_init('newton',
+                           x, f, grad_f, hess_f,
+                           maxiter, tol,
                            stepsize, adaptive, proj,
                            verbose)
-        self.hess_f = hess_f
         self.run()
-
+        
     def direction(self):
         """
         Compute the gradient g and Hessian H, then solve H dx = -g
@@ -190,8 +235,9 @@ class NewtonDescent(SteepestDescent):
         Upon failure, approximate the Hessian by a scalar matrix,
         i.e. H = tr(H) / n Id
         """
-        g = self.grad_f(self.x)
-        H = self.hess_f(self.x)
+        g = self._grad_f(self._x)
+        H = self._hess_f(self._x)
+        self._evals[1:3] += 1
         try:
             L, _ = cho_factor(H, lower=0)
             dx = -cho_solve((L, 0), g)
@@ -212,73 +258,66 @@ class QuasiNewtonDescent(SteepestDescent):
         """
         Assume fix hessian
         """
-        self._generic_init(x, f, grad_f, maxiter, tol,
+        self._generic_init('quasi_newton',
+                           x, f, grad_f, None,
+                           maxiter, tol,
                            stepsize, adaptive, proj,
                            verbose)
-        self.Hinv = inv_sym_matrix(hess_f)
+        self._hess_inv = inv_sym_matrix(hess_f)
         self.run()
-
+        
     def direction(self):
-        g = self.grad_f(self.x)
-        dx = -np.dot(self.Hinv, g)
+        g = self._grad_f(self._x)
+        self._evals[1] += 1
+        dx = -np.dot(self._hess_inv, g)
         return np.nan_to_num(dx)
 
 
-class ScipyCG(object):
+class ScipyCG(SteepestDescent):
 
     def __init__(self, x, f, grad_f, hess_f=None,
-                 maxiter=None, tol=1e-7,
-                 verbose=False):
-        t0 = time()
-        stuff = fmin_cg(f, x, fprime=grad_f, args=(),
-                        maxiter=maxiter, gtol=tol,
-                        full_output=True, disp=verbose)
-        self.x, self.fval = stuff[0], stuff[1]
-        self.time = time() - t0
+                 maxiter=None, tol=1e-7, verbose=False):
+        self._generic_init('cg', x, f, grad_f, None, maxiter, tol, None, None, None, verbose)
+        self.run()
 
-    def argmin(self):
-        return self.x
+    @probe_time
+    def _run(self):
+        self._x, self._fval = fmin_cg(self._f, self._x, fprime=self._grad_f,
+                                      gtol=self._tol, maxiter=self._maxiter, 
+                                      full_output=True, disp=self._verbose)[0:2]
 
-    def message(self):
-        print('Scipy conjugate gradient implementation')
-
-
-class ScipyNCG(object):
-
+    def __str__(self):
+        return '\t Initial function value: %f\n' % self._init_fval\
+            + '\t Optimization time: %f sec\n' % self._time
+    
+        
+class ScipyNCG(ScipyCG):
+        
     def __init__(self, x, f, grad_f, hess_f=None,
-                 maxiter=None, tol=1e-7,
-                 verbose=False):
-        t0 = time()
-        stuff = fmin_ncg(f, x, grad_f, fhess=hess_f, args=(),
-                         maxiter=maxiter, avextol=tol,
-                         full_output=True, disp=verbose)
-        self.x, self.fval = stuff[0], stuff[1]
-        self.time = time() - t0
+                 maxiter=None, tol=1e-7, verbose=False):
+        self._generic_init('ncg', x, f, grad_f, hess_f, maxiter, tol, None, None, None, verbose)
+        self._time = self.run()
 
-    def argmin(self):
-        return self.x
+    @probe_time
+    def _run(self):
+        self._x, self._fval = fmin_ncg(self._f, self._x, fprime=self._grad_f,
+                                       fhess=self._hess_f,
+                                       avextol=self._tol, maxiter=self._maxiter, 
+                                       full_output=True, disp=self._verbose)[0:2]
 
-    def message(self):
-        print('Scipy Newton conjugate gradient implementation')
-
-
-class ScipyBFGS(object):
-
+        
+class ScipyBFGS(ScipyCG):
+        
     def __init__(self, x, f, grad_f, hess_f=None,
-                 maxiter=None, tol=1e-7,
-                 verbose=False):
-        t0 = time()
-        stuff = fmin_bfgs(f, x, fprime=grad_f, args=(),
-                          maxiter=maxiter, gtol=tol,
-                          full_output=True, disp=verbose)
-        self.x, self.fval = stuff[0], stuff[1]
-        self.time = time() - t0
+                 maxiter=None, tol=1e-7, verbose=False):
+        self._generic_init('bfgs', x, f, grad_f, None, maxiter, tol, None, None, None, verbose)
+        self._time = self.run()
 
-    def argmin(self):
-        return self.x
-
-    def message(self):
-        print('Scipy BFGS quasi-Newton implementation')
+    @probe_time
+    def _run(self):
+        self._x, self._fval = fmin_bfgs(self._f, self._x, fprime=self._grad_f,
+                                        gtol=self._tol, maxiter=self._maxiter, 
+                                        full_output=True, disp=self._verbose)[0:2]
 
 
 def minimizer(name, x, f, grad_f, hess_f=None,

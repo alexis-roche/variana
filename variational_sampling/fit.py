@@ -153,7 +153,7 @@ class VariationalFit(object):
                       maxiter=self.maxiter, tol=self.tol,
                       verbose=VERBOSE)
         if VERBOSE:
-            m.message()
+            print(m)
         self._theta = m.argmin()
         self.minimizer = m
 

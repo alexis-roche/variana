@@ -68,7 +68,7 @@ class MaxentModel(object):
         g = self._gradient_z(w)[:, None]
         return -self._hessian_z(w) / z + np.dot(g, g.T) / (z  ** 2)
 
-    def fit(self, method='ncg', positive_weights=False, weights=None, **kwargs):
+    def fit(self, method='newton', positive_weights=False, weights=None, **kwargs):
         if not weights is None:
             self._w = np.asarray(weights)
         f = lambda w: -self.dual(w)
@@ -242,7 +242,7 @@ class MaxentModelGKL(object):
         if not weights is None:
             self._w = np.asarray(w)
         m = minimizer(method, self._w, cost, gradient_cost, hessian_cost, **kwargs)
-        self._w = m.argmin()
+        self._w = m.argmin()        
 
     @property
     def weights(self):

@@ -42,8 +42,7 @@ SIZE = 100
 FEATURES = 3
 FEATURE_CORRELATION = 0.5
 HOMOSCEDASTIC = False
-POSITIVE_WEIGHTS = False
-VERBOSE = True
+POSITIVE_WEIGHTS = True
 
 GAUSS = .5 * np.log(2 * np.pi)
 
@@ -100,7 +99,7 @@ else:
 basis = lambda x, y, i: log_lik1d(y[i], means[x, i], devs[x, i])
 moments = np.mean(mean_log_lik1d(devs[labels]), 0)
 m = ConditionalMaxentModel(2, basis, moments, data)
-m.fit(positive_weights=POSITIVE_WEIGHTS, verbose=VERBOSE, tol=1e-15)
+m.fit(positive_weights=POSITIVE_WEIGHTS, verbose=True)
 
 
 ###################
@@ -121,17 +120,16 @@ div = np.mean(np.log([r[x] for x, r in zip(labels, bayes_factors)]))
 print('Actual KL divergence = %f' % div)
 
 # Tests
-div_test = np.abs(div - m.dual(m.weights)) < 1e-5
+div_test = np.abs(div - m.dual(m.weights))
 g =  m.gradient_dual(m.weights)
 
 grad_test1 = True
 if np.max(m.weights) > 0:
-    grad_test1 = np.max(g[m.weights > 0]) < 1e-5
+    grad_test1 = np.max(g[m.weights > 0])
 grad_test2 = True
-if np.min(m.weights) == 0:  
+if np.min(m.weights) == 0:
     grad_test2 = np.max(g[m.weights == 0]) < 0
 
-print('Div test: %s' % div_test)
-print('Grad test 1: %s' % grad_test1)
+print('Div test: %f' % div_test)
+print('Grad test 1: %f' % grad_test1)
 print('Grad test 2: %s' % grad_test2)
-
