@@ -21,7 +21,7 @@ class MaxentModel(object):
         if isinstance(dim, int):
             self._prior = np.ones(dim)
         else:
-            self._prior = np.asarray(prior)
+            self._prior = np.asarray(dim)
         self._prior /= np.sum(self._prior)
         self._basis = basis
         self._moments = moments
