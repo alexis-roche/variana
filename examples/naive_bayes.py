@@ -1,70 +1,22 @@
-"""
-z|x ~ N(mx, sx)
-
-Homoscedastic sx = s
-=> p(x|z) 
-eq exp{-.5[(z-mx)/s]^2}
-eq exp( z mx/s^2 - .5 * mx^2/s^2 )
-
-=> n + 1 generative parameters
-=> n discriminative parameters
-Comparable generative model: n parameters
-
-Heteroscedasticity
-=> p(x|z) 
-eq exp{-.5[(z-mx)/sx]^2}
-eq exp( -.5 * (z/sx)^2 + (z mx/sx^2) - .5 * mx^2 )
-
-=> 2n generative parameters
-=> n discriminative parameters
-Comparative generative model: 2n parameters
-
-
-N = (100, 3)
-
-x = N(0, I3)
-Ax = N(0, AAT)
-
-AAT = exp(-d/a)
-
-d=0 ==> AAT = 1
-d=1 ==> exp(-1/a) = c
-
-a = 1/( -log(c))
-
-"""
-
 import numpy as np
 
-from variana.maxent import MaxentModel, ConditionalMaxentModel, MaxentModelGKL
+from variana.maxent import GaussianCompositeLikelihood
 
-SIZE = 100
-FEATURES = 3
-FEATURE_CORRELATION = 0.5
+SIZE = 1000
+CLASSES = 3
+FEATURES = 2
+FEATURE_CORRELATION = 0.9
 HOMOSCEDASTIC = False
 POSITIVE_WEIGHTS = False
-
-GAUSS = .5 * np.log(2 * np.pi)
-
-
-def mahalanobis(z, m, s):
-    return ((z - m) / s) ** 2
+SUPER = True
 
 
-def log_lik1d(z, m, s):
-    return - (GAUSS + np.log(s) + .5 * mahalanobis(z, m, s))
+def random_means(classes, features):
+    return 3 * (np.random.random(size=(classes, features)) - .5)
 
 
-def mean_log_lik1d(s):
-    return - (GAUSS + np.log(s) + .5)
-
-
-def random_means(n):
-    return 3 * (np.random.rand(FEATURES) - .5)
-
-
-def random_devs(n):
-    return 1 + np.random.rand(FEATURES)
+def random_devs(classes, features):
+    return 1 + np.random.random(size=(classes, features))
 
 
 def generate_noise(size, dim, autocorr=0):
@@ -78,27 +30,17 @@ def generate_noise(size, dim, autocorr=0):
     return np.dot(wn, A)
 
 
-true_means = np.array((random_means(FEATURES), random_means(FEATURES)))
+true_means = random_means(CLASSES, FEATURES)
 if HOMOSCEDASTIC:
-    devs = random_devs(FEATURES)
-    true_devs = np.array((devs, devs))
+    true_devs = np.repeat(random_devs(1, FEATURES), CLASSES, axis=0)   
 else:
-    true_devs = np.array((random_devs(FEATURES), random_devs(FEATURES)))
+    true_devs = random_devs(CLASSES, FEATURES)
 
-labels = np.random.randint(2, size=SIZE)
+labels = np.random.randint(CLASSES, size=SIZE)
 data = true_means[labels] +  generate_noise(SIZE, FEATURES, FEATURE_CORRELATION) * true_devs[labels]
 
-means = np.array([np.mean(data[labels==0], 0), np.mean(data[labels==1], 0)])
-if HOMOSCEDASTIC:
-    devs = np.std(data, 0)
-    devs = np.array((devs, devs))
-else:
-    devs = np.array([np.std(data[labels==0], 0), np.std(data[labels==1], 0)])
-
-
-basis = lambda x, y, i: log_lik1d(y[i], means[x, i], devs[x, i])
-moments = np.mean(mean_log_lik1d(devs[labels]), 0)
-m = ConditionalMaxentModel(2, basis, moments, data)
+#m = GaussianCompositeLikelihood(labels, data, super=SUPER, homoscedastic=HOMOSCEDASTIC)
+m = GaussianCompositeLikelihood(labels, data, prior='uniform', super=SUPER, homoscedastic=HOMOSCEDASTIC)
 m.fit(positive_weights=POSITIVE_WEIGHTS, verbose=True)
 
 
@@ -133,3 +75,5 @@ if np.min(m.weights) == 0:
 print('Div test: %f' % div_test)
 print('Grad test 1: %f' % grad_test1)
 print('Grad test 2: %s' % grad_test2)
+
+

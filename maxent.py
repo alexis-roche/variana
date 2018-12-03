@@ -8,24 +8,28 @@ from .utils import sdot, minimizer, CachedFunction, force_tiny, safe_exp
         
 class MaxentModel(object):
 
-    def __init__(self, dim, basis, moments):
+    def __init__(self, classes, basis, moments):
         """
-        dim is an integer or an array-like reperesenting the prior
-                basis is a function of label, data, feature index
+        classes is an integer or an array-like reperesenting the prior
+        basis is a function of label, data, feature index
         moments is a sequence of moments corresponding to basis 
         """
-        self._init_model(dim, basis, moments)
+        self._init_prior(classes)
+        self._init_model(basis, moments)
         self._init_optimizer()
 
-    def _init_model(self, dim, basis, moments, data=None):
-        if isinstance(dim, int):
-            self._prior = np.ones(dim)
-        else:
-            self._prior = np.asarray(dim)
+    def _init_prior(self, prior):
+        try:
+            classes = int(prior)
+            self._prior = np.ones(classes)
+        except:
+            self._prior = np.asarray(prior)
         self._prior /= np.sum(self._prior)
+        
+    def _init_model(self, basis, moments, data=None):
         self._basis = basis
         self._moments = moments
-        self._data = data
+        self._data = np.asarray(data)
         self._w = np.zeros(len(moments))
         
     def _init_optimizer(self):
@@ -97,14 +101,15 @@ class MaxentModel(object):
 
 class ConditionalMaxentModel(MaxentModel):
 
-    def __init__(self, dim, basis, moments, data):
+    def __init__(self, classes, basis, moments, data):
         """
-        dim is an integer or an array-like reperesenting the prior
+        classes is an integer or an array-like reperesenting the prior
         basis is a function of label, data, feature index
         moments is a sequence of moments corresponding to basis 
         data is array-like with shape (number of examples, number of features)
         """
-        self._init_model(dim, basis, moments, data=data)
+        self._init_prior(classes)
+        self._init_model(basis, moments, data=data)
         self._init_optimizer()
         
     def _init_optimizer(self):
@@ -163,7 +168,59 @@ class ConditionalMaxentModel(MaxentModel):
         p = self._prior * safe_exp(np.dot(fx, w))[0]
         return p / force_tiny(np.sum(p))
 
+    
+#########################################################################
+# Bayesian composite inference
+#########################################################################
 
+_GAUSS = .5 * np.log(2 * np.pi)
+log_lik1d = lambda z, m, s: -(_GAUSS + np.log(s) + .5 * ((z - m) / s) ** 2)
+mean_log_lik1d = lambda s: -(_GAUSS + np.log(s) + .5)
+  
+    
+class GaussianCompositeLikelihood(ConditionalMaxentModel):
+
+    def __init__(self, labels, data, prior=None, super=False, homoscedastic=False):
+        """
+        x (n, )
+        y (n, n_features)
+        """
+        labels = np.asarray(labels)
+        data = np.asarray(data)
+        classes = labels.max() + 1
+        features = data.shape[-1]
+
+        prop = np.array([np.mean(labels == x) for x in range(classes)])
+        means = np.array([np.mean(data[labels == x], 0) for x in range(classes)])
+        res2 = (data - means[labels]) ** 2
+        if homoscedastic:
+            devs = np.repeat(np.sqrt(np.mean(res2, 0))[None, :], classes, axis=0)
+        else:
+            devs = np.array([np.sqrt(np.mean(res2[labels == x], 0)) for x in range(classes)])
+
+        moments = prop[:, None] * np.array([mean_log_lik1d(devs[x]) for x in range(classes)])
+        if super:
+            def basis(x, y, j):
+                a = j // features
+                i = j % features
+                return (x == a) * log_lik1d(y[i], means[x, i], devs[x, i])
+            moments = moments.ravel()
+        else:
+            basis = lambda x, y, i: log_lik1d(y[i], means[x, i], devs[x, i])
+            moments = moments.sum(0)
+            
+        self._means = means
+        self._devs = devs
+
+        if prior is None:
+            prior = prop
+        elif prior == 'uniform':
+            prior = classes
+        self._init_prior(prior)
+        
+        self._init_model(basis, moments, data=data)
+        self._init_optimizer()
+        
 
 ##################################
 # Obsolete, kept for testing
@@ -193,14 +250,14 @@ psi(w) = w int p_w f + int pi - int p_w - w int p_w f + w F
 
 class MaxentModelGKL(object):
 
-    def __init__(self, dim, basis, moments):
+    def __init__(self, classes, basis, moments):
         """
-        dim is an integer or an array-like reperesenting the prior
+        classes is an integer or an array-like reperesenting the prior
         basis is a function of label, data, feature index
         moments is a sequence of moments corresponding to basis
         """
-        if isinstance(dim, int):
-            self._prior = np.ones(dim)
+        if isinstance(classes, int):
+            self._prior = np.ones(classes)
         else:
             self._prior = np.asarray(prior)
         self._prior /= np.sum(self._prior)
