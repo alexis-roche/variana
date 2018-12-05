@@ -1,13 +1,13 @@
 import numpy as np
 
-from variana.maxent import GaussianCompositeLikelihood
+from variana.maxent import GaussianCompositeInference
 
 SIZE = 1000
 CLASSES = 3
 FEATURES = 2
 FEATURE_CORRELATION = 0.9
-HOMOSCEDASTIC = False
 POSITIVE_WEIGHTS = False
+HOMOSCEDASTIC = False
 SUPER = True
 
 
@@ -39,8 +39,7 @@ else:
 labels = np.random.randint(CLASSES, size=SIZE)
 data = true_means[labels] +  generate_noise(SIZE, FEATURES, FEATURE_CORRELATION) * true_devs[labels]
 
-#m = GaussianCompositeLikelihood(labels, data, super=SUPER, homoscedastic=HOMOSCEDASTIC)
-m = GaussianCompositeLikelihood(labels, data, prior='uniform', super=SUPER, homoscedastic=HOMOSCEDASTIC)
+m = GaussianCompositeInference(labels, data, prior='empirical', super=SUPER, homoscedastic=HOMOSCEDASTIC)
 m.fit(positive_weights=POSITIVE_WEIGHTS, verbose=True)
 
 

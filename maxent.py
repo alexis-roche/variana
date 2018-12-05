@@ -4,9 +4,8 @@ import scipy.optimize as spo
 from .utils import sdot, minimizer, CachedFunction, force_tiny, safe_exp
 
 
-
         
-class MaxentModel(object):
+class Maxent(object):
 
     def __init__(self, classes, basis, moments):
         """
@@ -18,18 +17,25 @@ class MaxentModel(object):
         self._init_model(basis, moments)
         self._init_optimizer()
 
-    def _init_prior(self, prior):
+    def _init_prior(self, classes):
         try:
-            classes = int(prior)
-            self._prior = np.ones(classes)
+            self._prior = np.ones(int(classes))
         except:
-            self._prior = np.asarray(prior)
+            self._prior = np.asarray(classes)
         self._prior /= np.sum(self._prior)
         
-    def _init_model(self, basis, moments, data=None):
+    def _init_model(self, basis, moments, data=None, data_weights=None):
         self._basis = basis
         self._moments = moments
-        self._data = np.asarray(data)
+        if data is None:
+            self._data = None
+        else:
+            self._data = np.asarray(data)
+        if data_weights is None:
+            self._data_weights = None
+        else:
+            aux = np.asarray(data_weights)
+            self._data_weights = aux / aux.sum()
         self._w = np.zeros(len(moments))
         
     def _init_optimizer(self):
@@ -99,9 +105,10 @@ class MaxentModel(object):
         return self._prior
 
 
-class ConditionalMaxentModel(MaxentModel):
+    
+class ConditionalMaxent(Maxent):
 
-    def __init__(self, classes, basis, moments, data):
+    def __init__(self, classes, basis, moments, data, data_weights=None):
         """
         classes is an integer or an array-like reperesenting the prior
         basis is a function of label, data, feature index
@@ -109,7 +116,7 @@ class ConditionalMaxentModel(MaxentModel):
         data is array-like with shape (number of examples, number of features)
         """
         self._init_prior(classes)
-        self._init_model(basis, moments, data=data)
+        self._init_model(basis, moments, data=data, data_weights=data_weights)
         self._init_optimizer()
         
     def _init_optimizer(self):
@@ -121,6 +128,10 @@ class ConditionalMaxentModel(MaxentModel):
         self._udist_fxy = CachedFunction(self.__udist_fxy)
         self._z = CachedFunction(self.__z)
         self._gradient_z = CachedFunction(self.__gradient_z)
+        if self._data_weights is None:
+            self._sample_mean = lambda x: np.mean(x, 0)
+        else:
+            self._sample_mean = lambda x: np.sum(self._data_weights.reshape([x.shape[0]] + [1] * (len(x.shape) - 1)) * x, 0)
 
     def __udist(self, w):
         udist, norma = safe_exp(np.dot(self._fxy, w))
@@ -139,23 +150,23 @@ class ConditionalMaxentModel(MaxentModel):
 
     def _hessian_z(self, w):
         return sdot(np.swapaxes(self._udist_fxy(w), 1, 2), self._fxy)   
-
+    
     def dual(self, w):
         z, norma = self._z(w)
-        return np.dot(w, self._moments) - np.mean(np.log(z)) - norma
+        return np.dot(w, self._moments) - self._sample_mean(np.log(z)) - norma
         
     def gradient_dual(self, w):
         z, _ = self._z(w)
         g = self._gradient_z(w)
-        return self._moments - np.mean(g / z[:, None], 0)
+        return self._moments - self._sample_mean(g / z[:, None])
 
     def hessian_dual(self, w):
         z, _ = self._z(w)
         gn = self._gradient_z(w) / z[:, None]
         Gn2 = sdot(gn[:, :, None], gn[:, None, :])       
         Hn = self._hessian_z(w) / z[:, None, None]
-        return np.mean(-Hn + Gn2, 0)
-                
+        return self._sample_mean(-Hn + Gn2)
+
     def dist(self, y=None, w=None):
         if w is None:
             w = self._w
@@ -177,8 +188,8 @@ _GAUSS = .5 * np.log(2 * np.pi)
 log_lik1d = lambda z, m, s: -(_GAUSS + np.log(s) + .5 * ((z - m) / s) ** 2)
 mean_log_lik1d = lambda s: -(_GAUSS + np.log(s) + .5)
   
-    
-class GaussianCompositeLikelihood(ConditionalMaxentModel):
+
+class GaussianCompositeInference(ConditionalMaxent):
 
     def __init__(self, labels, data, prior=None, super=False, homoscedastic=False):
         """
@@ -190,7 +201,21 @@ class GaussianCompositeLikelihood(ConditionalMaxentModel):
         classes = labels.max() + 1
         features = data.shape[-1]
 
+        # Set prior and weight data accordinhgly
         prop = np.array([np.mean(labels == x) for x in range(classes)])
+        data_weighting = True
+        if prior is None:
+            prior = np.ones(classes)
+        elif prior == 'empirical':
+            prior = prop
+            data_weighting = False
+        self._init_prior(prior)
+        if data_weighting:
+            data_weights = (self._prior / prop)[labels]
+        else:
+            data_weights = None
+
+        # Feature-based ML parameter estimates 
         means = np.array([np.mean(data[labels == x], 0) for x in range(classes)])
         res2 = (data - means[labels]) ** 2
         if homoscedastic:
@@ -198,7 +223,8 @@ class GaussianCompositeLikelihood(ConditionalMaxentModel):
         else:
             devs = np.array([np.sqrt(np.mean(res2[labels == x], 0)) for x in range(classes)])
 
-        moments = prop[:, None] * np.array([mean_log_lik1d(devs[x]) for x in range(classes)])
+        # Expected log-likelihood values
+        moments = self._prior[:, None] * np.array([mean_log_lik1d(devs[x]) for x in range(classes)])
         if super:
             def basis(x, y, j):
                 a = j // features
@@ -208,18 +234,14 @@ class GaussianCompositeLikelihood(ConditionalMaxentModel):
         else:
             basis = lambda x, y, i: log_lik1d(y[i], means[x, i], devs[x, i])
             moments = moments.sum(0)
-            
+
         self._means = means
         self._devs = devs
-
-        if prior is None:
-            prior = prop
-        elif prior == 'uniform':
-            prior = classes
-        self._init_prior(prior)
         
-        self._init_model(basis, moments, data=data)
+        self._init_model(basis, moments, data=data, data_weights=data_weights)
         self._init_optimizer()
+
+
         
 
 ##################################
@@ -248,7 +270,7 @@ psi(w) = w int p_w f + int pi - int p_w - w int p_w f + w F
 
 """
 
-class MaxentModelGKL(object):
+class MaxentGKL(object):
 
     def __init__(self, classes, basis, moments):
         """
