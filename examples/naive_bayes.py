@@ -2,13 +2,14 @@ import numpy as np
 
 from variana.maxent import GaussianCompositeInference
 
-SIZE = 1000
+SIZE = 100
 CLASSES = 3
 FEATURES = 2
 FEATURE_CORRELATION = 0.9
 POSITIVE_WEIGHTS = False
+PRIOR = None  # 'empirical'
 HOMOSCEDASTIC = False
-SUPER = True
+SUPERCOMPOSITE = False
 
 
 def random_means(classes, features):
@@ -39,7 +40,7 @@ else:
 labels = np.random.randint(CLASSES, size=SIZE)
 data = true_means[labels] +  generate_noise(SIZE, FEATURES, FEATURE_CORRELATION) * true_devs[labels]
 
-m = GaussianCompositeInference(labels, data, prior='empirical', super=SUPER, homoscedastic=HOMOSCEDASTIC)
+m = GaussianCompositeInference(data, labels, prior=PRIOR, supercomposite=SUPERCOMPOSITE, homoscedastic=HOMOSCEDASTIC)
 m.fit(positive_weights=POSITIVE_WEIGHTS, verbose=True)
 
 
@@ -57,7 +58,7 @@ print('Gradient: %s' % m.gradient_dual(m.weights))
 
 # Dual should equate with KL-divergence
 bayes_factors = m.dist() / m.prior
-div = np.mean(np.log([r[x] for x, r in zip(labels, bayes_factors)]))
+div = np.sum(m.data_weights * np.log(bayes_factors[range(SIZE), labels]))
 print('Actual KL divergence = %f' % div)
 
 # Tests
@@ -74,5 +75,4 @@ if np.min(m.weights) == 0:
 print('Div test: %f' % div_test)
 print('Grad test 1: %f' % grad_test1)
 print('Grad test 2: %s' % grad_test2)
-
 

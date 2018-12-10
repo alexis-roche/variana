@@ -14,7 +14,8 @@ class Maxent(object):
         moments is a sequence of moments corresponding to basis 
         """
         self._init_prior(classes)
-        self._init_model(basis, moments)
+        self._init_basis(basis)
+        self._init_moments(moments)
         self._init_optimizer()
 
     def _init_prior(self, classes):
@@ -23,22 +24,15 @@ class Maxent(object):
         except:
             self._prior = np.asarray(classes)
         self._prior /= np.sum(self._prior)
-        
-    def _init_model(self, basis, moments, data=None, data_weights=None):
+
+    def _init_basis(self, basis):
         self._basis = basis
+
+    def _init_moments(self, moments):
         self._moments = moments
-        if data is None:
-            self._data = None
-        else:
-            self._data = np.asarray(data)
-        if data_weights is None:
-            self._data_weights = None
-        else:
-            aux = np.asarray(data_weights)
-            self._data_weights = aux / aux.sum()
-        self._w = np.zeros(len(moments))
-        
+
     def _init_optimizer(self):
+        self._w = np.zeros(len(self._moments))
         self._fx = np.array([[self._basis(x, i)\
                               for i in range(len(self._moments))]\
                              for x in range(len(self._prior))])
@@ -116,10 +110,21 @@ class ConditionalMaxent(Maxent):
         data is array-like with shape (number of examples, number of features)
         """
         self._init_prior(classes)
-        self._init_model(basis, moments, data=data, data_weights=data_weights)
+        self._init_basis(basis)
+        self._init_moments(moments)
+        self._init_data(data, data_weights)
         self._init_optimizer()
-        
+
+    def _init_data(self, data, data_weights):
+        self._data = np.asarray(data)
+        if data_weights is None:
+            self._data_weights = None
+        else:
+            aux = np.asarray(data_weights)
+            self._data_weights = aux / aux.sum()
+
     def _init_optimizer(self):
+        self._w = np.zeros(len(self._moments))
         self._fxy = np.array([[[self._basis(x, y, i)\
                                 for i in range(len(self._moments))]\
                                for x in range(len(self._prior))]\
@@ -179,30 +184,42 @@ class ConditionalMaxent(Maxent):
         p = self._prior * safe_exp(np.dot(fx, w))[0]
         return p / force_tiny(np.sum(p))
 
+    @property
+    def data(self):
+        return self._data
+
+    @property
+    def data_weights(self):
+        if self._data_weights is None:
+            return np.full(self._data.shape[0], 1 / self._data.shape[0])
+        return self._data_weights
+
+    
+
     
 #########################################################################
-# Bayesian composite inference
+# Maxent classifier
 #########################################################################
 
-_GAUSS = .5 * np.log(2 * np.pi)
-log_lik1d = lambda z, m, s: -(_GAUSS + np.log(s) + .5 * ((z - m) / s) ** 2)
-mean_log_lik1d = lambda s: -(_GAUSS + np.log(s) + .5)
-  
+class MaxentClassifier(ConditionalMaxent):
 
-class GaussianCompositeInference(ConditionalMaxent):
-
-    def __init__(self, labels, data, prior=None, super=False, homoscedastic=False):
+    def __init__(self, data, labels, basis, moments, prior=None):
         """
-        x (n, )
-        y (n, n_features)
+        labels (n, )
+        data (n, n_features)
+        moments is an int
+        Use empirical moments
         """
-        labels = np.asarray(labels)
-        data = np.asarray(data)
-        classes = labels.max() + 1
-        features = data.shape[-1]
+        self._init_training(data, labels, prior)
+        self._init_basis(basis)
+        self._init_moments(moments)
+        self._init_optimizer()
 
+    def _init_training(self, data, labels, prior):
         # Set prior and weight data accordinhgly
-        prop = np.array([np.mean(labels == x) for x in range(classes)])
+        self._labels = np.asarray(labels)
+        classes = self._labels.max() + 1
+        prop = np.array([np.mean(self._labels == x) for x in range(classes)])
         data_weighting = True
         if prior is None:
             prior = np.ones(classes)
@@ -214,35 +231,98 @@ class GaussianCompositeInference(ConditionalMaxent):
             data_weights = (self._prior / prop)[labels]
         else:
             data_weights = None
+        self._init_data(data, data_weights)
 
-        # Feature-based ML parameter estimates 
-        means = np.array([np.mean(data[labels == x], 0) for x in range(classes)])
-        res2 = (data - means[labels]) ** 2
-        if homoscedastic:
+    def _init_moments(self, moments):
+        # Assume moments is an int, compute the empirical moments
+        self._moments = np.array([np.mean([self._basis(x, y, i)\
+                                           for x, y in zip(self._labels, self._data)])\
+                                  for i in range(moments)])
+        
+
+#########################################################################
+# Bayesian composite inference
+#########################################################################
+
+_GAUSS = .5 * np.log(2 * np.pi)
+log_lik1d = lambda z, m, s: -(_GAUSS + np.log(s) + .5 * ((z - m) / s) ** 2)
+mean_log_lik1d = lambda s: -(_GAUSS + np.log(s) + .5)
+
+class GaussianCompositeInference(MaxentClassifier):
+
+    def __init__(self, data, labels, prior=None, supercomposite=False, homoscedastic=False):
+        """
+        labels (n, )
+        data (n, n_features)
+        """
+        self._homoscedastic = bool(homoscedastic)
+        self._supercomposite = bool(supercomposite)
+        self._init_training(data, labels, prior)
+        self._pre_train()
+        self._init_basis()
+        self._init_moments()
+        self._init_optimizer()
+
+    def _pre_train(self):
+        # Pre-training: feature-based ML parameter estimates
+        classes = len(self._prior)
+        means = np.array([np.mean(self._data[self._labels == x], 0) for x in range(classes)])
+        res2 = (self._data - means[self._labels]) ** 2
+        if self._homoscedastic:
             devs = np.repeat(np.sqrt(np.mean(res2, 0))[None, :], classes, axis=0)
         else:
-            devs = np.array([np.sqrt(np.mean(res2[labels == x], 0)) for x in range(classes)])
-
-        # Expected log-likelihood values
-        moments = self._prior[:, None] * np.array([mean_log_lik1d(devs[x]) for x in range(classes)])
-        if super:
-            def basis(x, y, j):
-                a = j // features
-                i = j % features
-                return (x == a) * log_lik1d(y[i], means[x, i], devs[x, i])
-            moments = moments.ravel()
-        else:
-            basis = lambda x, y, i: log_lik1d(y[i], means[x, i], devs[x, i])
-            moments = moments.sum(0)
-
+            devs = np.array([np.sqrt(np.mean(res2[self._labels == x], 0)) for x in range(classes)])
         self._means = means
         self._devs = devs
         
-        self._init_model(basis, moments, data=data, data_weights=data_weights)
+    def _init_basis(self):
+        features = self._data.shape[-1]
+        if self._supercomposite:
+            def basis(x, y, j):
+                a = j // features
+                i = j % features
+                return (x == a) * log_lik1d(y[i], self._means[x, i], self._devs[x, i])
+            self._basis = basis
+        else:
+            self._basis = lambda x, y, i: log_lik1d(y[i], self._means[x, i], self._devs[x, i])
+
+    def _init_moments(self):
+        # Optional computation, faster than empirical mean log-likelihood values
+        moments = self._prior[:, None] * np.array([mean_log_lik1d(self._devs[x]) for x in range(len(self._prior))])
+        if self._supercomposite:
+            self._moments = moments.ravel()
+        else:
+            self._moments = moments.sum(0)
+
+
+#########################################################################
+# Logistic regression
+#########################################################################
+
+class LogisticRegression(MaxentClassifier):
+
+    def __init__(self, data, labels, prior=None):
+        """
+        labels (n, )
+        data (n, n_features)
+        Use empirical moments
+        """
+        self._init_training(data, labels, prior)
+        self._init_basis()
+        self._init_moments((self._data.shape[-1] + 1) * len(self._prior))
         self._init_optimizer()
 
+    def _init_basis(self):
+        n = self._data.shape[-1] + 1
+        def basis(x, y, j):
+            a = j // n
+            i = j % n
+            if i == 0:
+                return (x == a)
+            else:
+                return (x == a) * y[i - 1]
+        self._basis = basis
 
-        
 
 ##################################
 # Obsolete, kept for testing
