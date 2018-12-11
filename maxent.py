@@ -85,7 +85,8 @@ class Maxent(object):
             proj = None
         m = minimizer(method, self._w, f, grad_f, hess_f, proj=proj, **kwargs)
         self._w = m.argmin()
-        
+        self._optimizer = m
+
     def dist(self):
         udist, _ = self._udist(self._w)
         return udist / np.sum(udist)
@@ -402,7 +403,7 @@ class MaxentGKL(object):
             self._w = np.asarray(w)
         m = minimizer(method, self._w, cost, gradient_cost, hessian_cost, **kwargs)
         self._w = m.argmin()        
-
+        
     @property
     def weights(self):
         return self._w

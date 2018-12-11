@@ -218,6 +218,7 @@ class NewtonDescent(SteepestDescent):
     def __init__(self, x, f, grad_f, hess_f,
                  maxiter=None, tol=1e-7,
                  stepsize=1., adaptive=True,
+                 damping=1e-10,
                  proj=None,
                  verbose=False):
         self._generic_init('newton',
@@ -225,26 +226,30 @@ class NewtonDescent(SteepestDescent):
                            maxiter, tol,
                            stepsize, adaptive, proj,
                            verbose)
+        self._damping = to_float(damping)
         self.run()
         
     def direction(self):
-        """
-        Compute the gradient g and Hessian H, then solve H dx = -g
-        using the Cholesky decomposition: H = L L.T
+        """Compute the gradient g and Hessian H, then solve H dx = -g using
+        the Cholesky decomposition: H = L L.T
 
-        Upon failure, approximate the Hessian by a scalar matrix,
-        i.e. H = tr(H) / n Id
+        Upon failure, add a scalar matrix to the Hessian until the
+        Cholesky decomposition works.
         """
         g = self._grad_f(self._x)
         H = self._hess_f(self._x)
         self._evals[1:3] += 1
-        try:
-            L, _ = cho_factor(H, lower=0)
-            dx = -cho_solve((L, 0), g)
-        except:
-            warn('Ooops... singular Hessian, regularizing')
-            trH = force_tiny(np.trace(H))
-            dx = -(H.shape[0] / trH) * g
+        Hr = H
+        damping = self._damping
+        while True:
+            try:        
+                L, _ = cho_factor(Hr, lower=0)
+                dx = -cho_solve((L, 0), g)
+                break
+            except:
+                warn('Ooops... singular Hessian, regularizing')
+                Hr = H + damping * np.eye(H.shape[0])
+                damping *= 10
         return np.nan_to_num(dx)
 
 
