@@ -10,6 +10,6 @@ m = Maxent(6, lambda x, i: x + 1, [avg_spots])
 m.fit()
 pdist = m.dist()
 
-print('Weights: %s' % m.weights)
+print('Weights: %s' % m.weight)
 print('Maxent distribution: %s' % pdist)
-print('Average number of dots: expected = %f, achieved = %f' % (avg_spots, np.sum(pdist*np.arange(1, 7))))
+print('Average number of dots: expected = %f, achieved = %f' % (avg_spots, np.sum(pdist * np.arange(1, 7))))
