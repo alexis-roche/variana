@@ -36,49 +36,45 @@ def comparos(d1, d2):
     return np.mean(aux), np.argmax(aux)
 
 
+def checkos(lr, target, dist):
+    print('Cross-entropy variana = %f' % cross_entropy(target, lr.dist()))
+    g = lr2.gradient_dual(lr2.weight)
+    print('Grad test = %f' % np.max(np.abs(g)))
+    print('Comparison: %f, %d' % comparos(dist, dist2))
+
+    
 dataset = 'iris'
 if len(sys.argv) > 1:
     dataset = sys.argv[1]
 
 data, target = load(dataset)
 
-# DEBUG
-###data = data[:, 0:2]
 
-# sklearn implementation
-print('sklearn')
+print('*************************************')
+print('Logistic regression (sklearn)')
 lr = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='multinomial')
 lr.fit(data, target)
 dist = lr.predict_proba(data)
 print('Cross-entropy sklearn = %f' % cross_entropy(target, dist))
 
-# variana implementation
-print('variana')
+print('*************************************')
+print('Logistic regression (variana)')
 lr2 = LogisticRegression2(data, target)
-print('Opt starts')
-lr2.fit(verbose=True)
+lr2.fit()
 dist2 = lr2.dist()
-print('Cross-entropy variana = %f' % cross_entropy(target, dist2))
+checkos(lr2, target, dist)
 
-g = lr2.gradient_dual(lr2.weight)
-print('Grad test = %f' % np.max(np.abs(g)))
-print(comparos(dist, dist2))
-
-
-"""
-# Composite likelihood
-print('composite stuff')
-lr3 = GaussianCompositeInference(data, target, homoscedastic=True)
+print('*************************************')
+print('Composite Inference')
+lr3 = GaussianCompositeInference(data, target)
 lr3.fit()
-print('Opt starts')
 dist3 = lr3.dist()
-print('Cross-entropy composite = %f' % cross_entropy(target, dist3))
-print(comparos(dist, dist3))
-"""
+checkos(lr3, target, dist2)
+
 
 def zob(idx):
     pl.figure()
-    pl.plot(dist[idx, :], 'b')
+    pl.plot(dist[idx, :], 'b:')
     try:
         pl.plot(dist2[idx, :], 'g')
     except:
@@ -88,8 +84,4 @@ def zob(idx):
     except:
         print('dist3 does not exist')
     pl.show()
-
-
-#y, yt, x, xt = train_test_split(data, target, test_size=TEST_SIZE)
-
 

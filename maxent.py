@@ -13,14 +13,17 @@ class Maxent(object):
         moment is a sequence of mean values corresponding to basis
         prior is None or an array-like reperesenting the prior
         """
-        self._init_optimizer(basis)
+        self._init_basis(basis)
+        self._init_optimizer()
         self._init_prior(prior)
         self._init_moment(moment)
 
-    def _init_optimizer(self, basis):
+    def _init_basis(self, basis):
         self._basis = np.asarray(basis)
         if self._basis.ndim == 1:
             self._basis = self._basis[:, None]
+
+    def _init_optimizer(self):
         moments = self._basis.shape[-1]
         self._lda = np.zeros(moments)
         self._udist = CachedFunction(self.__udist)
@@ -133,9 +136,9 @@ def normalize_dist(p, tiny=1e-25):
 
 class ConditionalMaxent(Maxent):
 
-    def __init__(self, basis_fn, moment, data, prior=None, data_weight=None):
+    def __init__(self, basis_generator, moment, data, prior=None, data_weight=None):
         """
-        basis_fn is a function that takes an array of data with
+        basis_generator is a function that takes an array of data with
         shape (examples, features) and returns an array with shape
         (examples, targets, moments)
         moment is a sequence of mean values corresponding to basis 
@@ -144,7 +147,8 @@ class ConditionalMaxent(Maxent):
 
         """
         self._init_data(data, data_weight)
-        self._init_optimizer(basis_fn)
+        self._init_basis(basis_generator)
+        self._init_optimizer()
         self._init_prior(prior)
         self._init_moment(moment)
 
@@ -155,20 +159,22 @@ class ConditionalMaxent(Maxent):
         else:
             aux = np.asarray(data_weight)
             self._w = aux / aux.sum()
+        if self._w is None:
+            self._sample_mean = lambda x: np.mean(x, 0)
+        else:
+            self._sample_mean = lambda x: np.sum(self._w.reshape([x.shape[0]] + [1] * (len(x.shape) - 1)) * x, 0)
 
-    def _init_optimizer(self, basis_fn):
-        self._basis_fn = basis_fn
-        self._basis = basis_fn(self._data)
+    def _init_basis(self, basis_generator):
+        self._basis_generator = basis_generator
+        self._basis = basis_generator(self._data)
+        
+    def _init_optimizer(self):
         moments = self._basis.shape[-1]
         self._lda = np.zeros(moments)
         self._udist = CachedFunction(self.__udist)
         self._udist_basis = CachedFunction(self.__udist_basis)
         self._z = CachedFunction(self.__z)
         self._gradient_z = CachedFunction(self.__gradient_z)
-        if self._w is None:
-            self._sample_mean = lambda x: np.mean(x, 0)
-        else:
-            self._sample_mean = lambda x: np.sum(self._w.reshape([x.shape[0]] + [1] * (len(x.shape) - 1)) * x, 0)
 
     def __udist(self, lda):
         return safe_exp_dist(self._basis, lda, self._prior)
@@ -207,7 +213,7 @@ class ConditionalMaxent(Maxent):
             weight = self._lda
         if data is None:
             return normalize_dist(self._udist(weight)[0])
-        fxy = self._basis_fn(reshape_data(data))
+        fxy = self._basis_generator(reshape_data(data))
         p, _ = safe_exp_dist(fxy, weight, self._prior)
         return normalize_dist(p)
     
@@ -230,14 +236,15 @@ class ConditionalMaxent(Maxent):
 
 class MaxentClassifier(ConditionalMaxent):
 
-    def __init__(self, data, target, basis_fn, prior=None):
+    def __init__(self, data, target, basis_generator, prior=None):
         """
         data (n, n_features)
         target (n, )
         Use empirical moments
         """
         self._init_dataset(data, target, prior)
-        self._init_optimizer(basis_fn)
+        self._init_basis(basis_generator)
+        self._init_optimizer()
         self._init_moment()
 
     def _init_dataset(self, data, target, prior):
@@ -291,38 +298,50 @@ class GaussianCompositeInference(MaxentClassifier):
         self._supercomposite = bool(supercomposite)
         self._init_dataset(data, target, prior)        
         self._init_training()
-        self._init_optimizer(self._make_basis_fn())
+        self._init_basis(self._make_basis_generator())
+        self._init_optimizer()
         self._init_moment()
-
+        
     def _init_training(self):
         # Pre-training: feature-based ML parameter estimates
         targets = len(self._prior)
         means = np.array([np.mean(self._data[self._target == x], 0) for x in range(targets)])
         res2 = (self._data - means[self._target]) ** 2
         if self._homoscedastic:
-            devs = np.repeat(np.sqrt(np.mean(res2, 0))[None, :], targets, axis=0)
+            devs = np.repeat(np.sqrt(self._sample_mean(res2))[None, :], targets, axis=0)
         else:
             devs = np.array([np.sqrt(np.mean(res2[self._target == x], 0)) for x in range(targets)])
         self._means = means
         self._devs = devs
 
-    def _make_basis_fn(self):
-        def basis_fn(data):
-            targets = len(self._prior)
+    def _make_basis_generator(self):
+        targets = len(self._prior)
+        def basis_generator(data):
             examples, features = data.shape
             out = np.zeros((examples, targets, features))
             for x in range(targets):
                 out[:, x, :] = log_lik1d(data, self._means[x], self._devs[x])
             return out
-        return basis_fn
+        def basis_generator_super(data):
+            examples, features = data.shape
+            out = np.zeros((examples, targets, targets * features))
+            for x in range(targets):
+                n_x = features * x
+                out[:, x, n_x:(n_x + features)] = log_lik1d(data, self._means[x], self._devs[x])
+            return out
+        if self._supercomposite:
+            return basis_generator_super
+        return basis_generator
     
-    def _init_moment(self):
-        # Overwrites default because it is faster than empirical mean log-likelihood values
+    def _check_moment(self):
+        # Faster than empirical mean log-likelihood values but does
+        # not work if super composite and homoscedastic
         moment = self._prior[:, None] * np.array([mean_log_lik1d(self._devs[x]) for x in range(len(self._prior))])
         if self._supercomposite:
-            self._moment = moment.ravel()
+            moment = moment.ravel()
         else:
-            self._moment = moment.sum(0)
+            moment = moment.sum(0)
+        return moment
 
 
 #########################################################################
@@ -333,12 +352,13 @@ class LogisticRegression(MaxentClassifier):
 
     def __init__(self, data, target, prior=None):
         self._init_dataset(data, target, prior)
-        self._init_optimizer(self._make_basis_fn())
+        self._init_basis(self._make_basis_generator())
+        self._init_optimizer()
         self._init_moment()
 
-    def _make_basis_fn(self):
-        def basis_fn(data):
-            targets = len(self._prior)
+    def _make_basis_generator(self):
+        targets = len(self._prior)
+        def basis_generator(data):
             examples, features = data.shape
             n = features + 1
             out = np.zeros((examples, targets, n * targets))
@@ -347,7 +367,7 @@ class LogisticRegression(MaxentClassifier):
                 out[:, x, nx] = 1
                 out[:, x, (nx + 1):(nx + n)] = data
             return out
-        return basis_fn
+        return basis_generator
 
 
 
