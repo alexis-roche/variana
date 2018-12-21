@@ -1,81 +1,71 @@
 import numpy as np
 import scipy.optimize as spo
 
-from .utils import sdot, minimizer, CachedFunction, force_tiny, safe_exp
-
-
-
-def aval_cochonne(basis, targets, moments):
-    """
-    Output has shape targets, moments
-    """
-    out = np.array([[basis(x, i)\
-                     for i in range(moments)]\
-                    for x in range(targets)])
-    return out.reshape(out.shape[0:2])
+from .utils import sdot, minimizer, CachedFunction, force_tiny
 
 
 
 class Maxent(object):
 
-    def __init__(self, targets, basis, moment):
+    def __init__(self, basis, moment, prior=None):
         """
-        targets is an integer or an array-like reperesenting the prior
-        basis is a function of label, data, feature index
-        moment is a sequence of mean values corresponding to basis 
+        basis is an array (targets, moments)
+        moment is a sequence of mean values corresponding to basis
+        prior is None or an array-like reperesenting the prior
         """
-        self._init_prior(targets)
-        self._init_basis(basis)
+        self._init_optimizer(basis)
+        self._init_prior(prior)
         self._init_moment(moment)
-        self._init_optimizer()
 
-    def _init_prior(self, targets):
-        try:
-            self._prior = np.ones(int(targets))
-        except:
-            self._prior = np.asarray(targets)
-        self._prior /= np.sum(self._prior)
+    def _init_optimizer(self, basis):
+        self._basis = np.asarray(basis)
+        if self._basis.ndim == 1:
+            self._basis = self._basis[:, None]
+        moments = self._basis.shape[-1]
+        self._lda = np.zeros(moments)
+        self._udist = CachedFunction(self.__udist)
+        self._udist_basis = CachedFunction(self.__udist_basis)
+        self._z = CachedFunction(self.__z)
+        self._gradient_z = CachedFunction(self.__gradient_z)
 
-    def _init_basis(self, basis):
-        self._basis = basis
+    def _init_prior(self, prior):
+        if prior is None:
+            self._prior = np.ones(self._basis.shape[-2])
+        else:
+            self._prior = np.asarray(prior)
+        self._prior /= np.sum(self._prior)        
 
     def _init_moment(self, moment):
         self._moment = np.asarray(moment)
+        if self._moment.ndim == 0:
+            self._moment = self._moment[None]
 
-    def _init_optimizer(self):
-        self._lda = np.zeros(len(self._moment))
-        self._fx = aval_cochonne(self._basis, len(self._prior), len(self._moment))
-        self._udist = CachedFunction(self.__udist)
-        self._udist_fx = CachedFunction(self.__udist_fx)
-        self._z = CachedFunction(self.__z)
-        self._gradient_z = CachedFunction(self.__gradient_z)
-        
     def __udist(self, lda):
-        udist, norma = safe_exp(np.dot(self._fx, lda))
-        return self._prior * udist, norma
-       
-    def __udist_fx(self, lda):
-        udist, _ = self._udist(lda)
-        return udist[:, None] * self._fx
-
+        aux = np.dot(self._basis, lda)
+        norma = aux.max()
+        return self._prior * np.exp(aux - norma), norma
+        
+    def __udist_basis(self, lda):
+        return self._udist(lda)[0][:, None] * self._basis
+            
     def __z(self, lda):
         udist, norma = self._udist(lda)
-        return force_tiny(np.sum(udist)), norma
+        return np.sum(udist), norma
 
     def __gradient_z(self, lda):
-        return np.sum(self._udist_fx(lda), 0)
-
+        return np.sum(self._udist_basis(lda), 0)
+    
     def _hessian_z(self, lda):
-        return np.dot(self._udist_fx(lda).T, self._fx)
-
+        return np.dot(self._udist_basis(lda).T, self._basis)
+        
     def dual(self, lda):
         z, norma = self._z(lda)
-        return np.dot(lda, self._moment) - np.log(z) - norma
-
+        return np.dot(lda, self._moment) - np.log(force_tiny(z)) - norma
+        
     def gradient_dual(self, lda):
         z, _ = self._z(lda)
         return self._moment - self._gradient_z(lda) / z
-
+        
     def hessian_dual(self, lda):
         z, _ = self._z(lda)
         g = self._gradient_z(lda)[:, None]
@@ -100,6 +90,9 @@ class Maxent(object):
         udist, _ = self._udist(self._lda)
         return udist / np.sum(udist)
 
+    def score(self):
+        return self.dual(self._lda)
+
     @property
     def weight(self):
         return self._lda
@@ -108,16 +101,6 @@ class Maxent(object):
     def prior(self):
         return self._prior
 
-
-def eval_basis(basis, data, targets, moments):
-    """
-    Output has shape points, targets, moments
-    """
-    out = np.array([[[basis(x, y, i)\
-                      for i in range(moments)]\
-                     for x in range(targets)]\
-                    for y in data])
-    return out.reshape(out.shape[0:3])
 
 
 def reshape_data(data):
@@ -134,20 +117,36 @@ def reshape_data(data):
     return out
 
 
+def safe_exp_dist(fxy, lda, prior):
+    aux = np.dot(fxy, lda)
+    norma = aux.max(1)
+    return prior * np.exp(aux - norma[:, None]), norma
+
+
+def normalize_dist(p, tiny=1e-25):
+    out = np.full(p.shape, 1 / p.shape[1])
+    aux = np.sum(p, 1)
+    nonzero = aux > tiny
+    out[nonzero] = p / aux[nonzero][:, None]
+    return out
+
+
 class ConditionalMaxent(Maxent):
 
-    def __init__(self, targets, basis, moment, data, data_weight=None):
+    def __init__(self, basis_fn, moment, data, prior=None, data_weight=None):
         """
-        targets is an integer or an array-like reperesenting the prior
-        basis is a function of label, data, feature index
+        basis_fn is a function that takes an array of data with
+        shape (examples, features) and returns an array with shape
+        (examples, targets, moments)
         moment is a sequence of mean values corresponding to basis 
         data is a sequence of length equal to the number of examples
+        prior is None or an array-like reperesenting the prior
+
         """
-        self._init_prior(targets)
-        self._init_basis(basis)
-        self._init_moment(moment)
         self._init_data(data, data_weight)
-        self._init_optimizer()
+        self._init_optimizer(basis_fn)
+        self._init_prior(prior)
+        self._init_moment(moment)
 
     def _init_data(self, data, data_weight):
         self._data = reshape_data(data)
@@ -157,11 +156,13 @@ class ConditionalMaxent(Maxent):
             aux = np.asarray(data_weight)
             self._w = aux / aux.sum()
 
-    def _init_optimizer(self):
-        self._lda = np.zeros(len(self._moment))
-        self._fxy = eval_basis(self._basis, self._data, len(self._prior), len(self._moment))
+    def _init_optimizer(self, basis_fn):
+        self._basis_fn = basis_fn
+        self._basis = basis_fn(self._data)
+        moments = self._basis.shape[-1]
+        self._lda = np.zeros(moments)
         self._udist = CachedFunction(self.__udist)
-        self._udist_fxy = CachedFunction(self.__udist_fxy)
+        self._udist_basis = CachedFunction(self.__udist_basis)
         self._z = CachedFunction(self.__z)
         self._gradient_z = CachedFunction(self.__gradient_z)
         if self._w is None:
@@ -170,26 +171,24 @@ class ConditionalMaxent(Maxent):
             self._sample_mean = lambda x: np.sum(self._w.reshape([x.shape[0]] + [1] * (len(x.shape) - 1)) * x, 0)
 
     def __udist(self, lda):
-        udist, norma = safe_exp(np.dot(self._fxy, lda))
-        return self._prior * udist, norma
-       
-    def __udist_fxy(self, lda):
-        udist, _ = self._udist(lda)
-        return udist[..., None] * self._fxy
+        return safe_exp_dist(self._basis, lda, self._prior)
+
+    def __udist_basis(self, lda):
+        return self._udist(lda)[0][..., None] * self._basis
 
     def __z(self, lda):
         udist, norma = self._udist(lda)
-        return force_tiny(np.sum(udist, 1)), norma
+        return np.sum(udist, 1), norma
 
     def __gradient_z(self, lda):
-        return np.sum(self._udist_fxy(lda), 1)
+        return np.sum(self._udist_basis(lda), 1)
 
     def _hessian_z(self, lda):
-        return sdot(np.swapaxes(self._udist_fxy(lda), 1, 2), self._fxy)   
+        return sdot(np.swapaxes(self._udist_basis(lda), 1, 2), self._basis)   
     
     def dual(self, lda):
         z, norma = self._z(lda)
-        return np.dot(lda, self._moment) - self._sample_mean(np.log(z)) - norma
+        return np.dot(lda, self._moment) - self._sample_mean(np.log(force_tiny(z)) + norma)
         
     def gradient_dual(self, lda):
         z, _ = self._z(lda)
@@ -199,21 +198,19 @@ class ConditionalMaxent(Maxent):
     def hessian_dual(self, lda):
         z, _ = self._z(lda)
         gn = self._gradient_z(lda) / z[:, None]
-        Gn2 = sdot(gn[:, :, None], gn[:, None, :])       
-        Hn = self._hessian_z(lda) / z[:, None, None]
-        return self._sample_mean(-Hn + Gn2)
+        H1 = sdot(gn[:, :, None], gn[:, None, :])       
+        H2 = self._hessian_z(lda) / z[:, None, None]
+        return self._sample_mean(-H2 + H1)
 
     def dist(self, data=None, weight=None):
         if weight is None:
             weight = self._lda
         if data is None:
-            udist, _ = self._udist(self._lda)
-            return udist / np.sum(udist, 1)[:, None]
-        data = reshape_data(data)
-        fxy = eval_basis(self._basis, data, len(self._prior), len(self._moment))
-        p = self._prior * safe_exp(np.dot(fxy, weight))[0]
-        return p / force_tiny(np.sum(np.sum(p, 1)[:, None]))
-
+            return normalize_dist(self._udist(weight)[0])
+        fxy = self._basis_fn(reshape_data(data))
+        p, _ = safe_exp_dist(fxy, weight, self._prior)
+        return normalize_dist(p)
+    
     @property
     def data(self):
         return self._data
@@ -233,20 +230,18 @@ class ConditionalMaxent(Maxent):
 
 class MaxentClassifier(ConditionalMaxent):
 
-    def __init__(self, data, target, basis, moments, prior=None):
+    def __init__(self, data, target, basis_fn, prior=None):
         """
         data (n, n_features)
         target (n, )
-        moments is an int
         Use empirical moments
         """
-        self._init_training(data, target, prior)
-        self._init_basis(basis)
-        self._init_moment(moments)
-        self._init_optimizer()
+        self._init_dataset(data, target, prior)
+        self._init_optimizer(basis_fn)
+        self._init_moment()
 
-    def _init_training(self, data, target, prior):
-        # Set prior and weight data accordinhgly
+    def _init_dataset(self, data, target, prior):
+        # Set prior and weight data accordingly
         self._target = np.asarray(target)
         targets = self._target.max() + 1
         prop = np.array([np.mean(self._target == x) for x in range(targets)])
@@ -263,20 +258,27 @@ class MaxentClassifier(ConditionalMaxent):
             data_weight = None
         self._init_data(data, data_weight)
 
-    def _init_moment(self, moments):
-        # Assume moments is an int, compute the empirical moments
-        self._moment = np.array([np.mean([self._basis(x, y, i)\
-                                          for x, y in zip(self._target, self._data)])\
-                                 for i in range(moments)])
-        
+    def _init_moment(self):
+        # Use empirical moments
+        self._moment = np.sum(self._w[:, None] * self._basis[range(self._basis.shape[0]), self._target], 0)
+
 
 #########################################################################
 # Bayesian composite inference
 #########################################################################
 
-_GAUSS = .5 * np.log(2 * np.pi)
-log_lik1d = lambda z, m, s: -(_GAUSS + np.log(s) + .5 * ((z - m) / s) ** 2)
-mean_log_lik1d = lambda s: -(_GAUSS + np.log(s) + .5)
+GAUSS_CONSTANT = .5 * np.log(2 * np.pi)
+
+
+def log_lik1d(z, m, s):
+    s = force_tiny(s)
+    return -(GAUSS_CONSTANT + np.log(s) + .5 * ((z - m) / s) ** 2)
+
+
+def mean_log_lik1d(s):
+    s = force_tiny(s)
+    return -(GAUSS_CONSTANT + np.log(s) + .5)
+
 
 class GaussianCompositeInference(MaxentClassifier):
 
@@ -287,13 +289,12 @@ class GaussianCompositeInference(MaxentClassifier):
         """
         self._homoscedastic = bool(homoscedastic)
         self._supercomposite = bool(supercomposite)
-        self._init_training(data, target, prior)
-        self._pre_train()
-        self._init_basis()
+        self._init_dataset(data, target, prior)        
+        self._init_training()
+        self._init_optimizer(self._make_basis_fn())
         self._init_moment()
-        self._init_optimizer()
 
-    def _pre_train(self):
+    def _init_training(self):
         # Pre-training: feature-based ML parameter estimates
         targets = len(self._prior)
         means = np.array([np.mean(self._data[self._target == x], 0) for x in range(targets)])
@@ -304,20 +305,19 @@ class GaussianCompositeInference(MaxentClassifier):
             devs = np.array([np.sqrt(np.mean(res2[self._target == x], 0)) for x in range(targets)])
         self._means = means
         self._devs = devs
-        
-    def _init_basis(self):
-        features = self._data.shape[-1]
-        if self._supercomposite:
-            def basis(x, y, j):
-                a = j // features
-                i = j % features
-                return (x == a) * log_lik1d(y[i], self._means[x, i], self._devs[x, i])
-            self._basis = basis
-        else:
-            self._basis = lambda x, y, i: log_lik1d(y[i], self._means[x, i], self._devs[x, i])
 
+    def _make_basis_fn(self):
+        def basis_fn(data):
+            targets = len(self._prior)
+            examples, features = data.shape
+            out = np.zeros((examples, targets, features))
+            for x in range(targets):
+                out[:, x, :] = log_lik1d(data, self._means[x], self._devs[x])
+            return out
+        return basis_fn
+    
     def _init_moment(self):
-        # Optional computation, faster than empirical mean log-likelihood values
+        # Overwrites default because it is faster than empirical mean log-likelihood values
         moment = self._prior[:, None] * np.array([mean_log_lik1d(self._devs[x]) for x in range(len(self._prior))])
         if self._supercomposite:
             self._moment = moment.ravel()
@@ -332,26 +332,23 @@ class GaussianCompositeInference(MaxentClassifier):
 class LogisticRegression(MaxentClassifier):
 
     def __init__(self, data, target, prior=None):
-        """
-        data (n, n_features)
-        target (n, )
-        Use empirical moments
-        """
-        self._init_training(data, target, prior)
-        self._init_basis()
-        self._init_moment((self._data.shape[-1] + 1) * len(self._prior))
-        self._init_optimizer()
+        self._init_dataset(data, target, prior)
+        self._init_optimizer(self._make_basis_fn())
+        self._init_moment()
 
-    def _init_basis(self):
-        n = self._data.shape[-1] + 1
-        def basis(x, y, j):
-            a = j // n
-            i = j % n
-            if i == 0:
-                return (x == a)
-            else:
-                return (x == a) * y[i - 1]
-        self._basis = basis
+    def _make_basis_fn(self):
+        def basis_fn(data):
+            targets = len(self._prior)
+            examples, features = data.shape
+            n = features + 1
+            out = np.zeros((examples, targets, n * targets))
+            for x in range(targets):
+                nx = n * x
+                out[:, x, nx] = 1
+                out[:, x, (nx + 1):(nx + n)] = data
+            return out
+        return basis_fn
+
 
 
 ##################################
@@ -377,7 +374,6 @@ psi(w) = w int p_w f + int pi - int p_w - w int p_w f + w F
 => psi(w) = w F - int p_w + int pi
 => grad_psi(w) = F - int p_w f
 => hess_psi(w) = - int p_w ff'
-
 """
 
 class MaxentGKL(object):

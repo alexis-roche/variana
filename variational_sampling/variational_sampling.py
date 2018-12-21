@@ -5,9 +5,17 @@ from time import time
 import numpy as np
 from scipy.optimize import fmin_ncg
 
-from ..utils import (HUGE, safe_exp, approx_gradient, approx_hessian_diag, approx_hessian)
+from ..utils import (HUGE, approx_gradient, approx_hessian_diag, approx_hessian)
 from ..gaussian import (as_normalized_gaussian, Gaussian, FactorGaussian, laplace_approximation)
 from .fit import (VariationalFit, QuadratureFit)
+
+
+def safe_exp(x):
+    """
+    Returns a tuple (exp(x-xmax), xmax).
+    """
+    xmax = x.max()
+    return np.exp(x - xmax), xmax
 
 
 def reflect_sample(xs, m):

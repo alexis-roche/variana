@@ -5,13 +5,14 @@ Basic implementation of Gauss-Newton gradient descent scheme.
 from ._utils import _sdot
 
 from time import time
-from warnings import warn
 import numpy as np
 from scipy.linalg import cho_factor, cho_solve, eigh
 from scipy.optimize import fmin_cg, fmin_ncg, fmin_bfgs
 
-_TINY = 1e-10
-_HUGE = 1e50
+
+TINY = 1e-10
+HUGE = 1e50
+
 
 def probe_time(func):
     def wrapper(x):
@@ -26,23 +27,15 @@ def probe_time(func):
 
 
 def force_tiny(x):
-    return np.maximum(x, _TINY)
+    return np.maximum(x, TINY)
 
 
 def force_finite(x):
-    return np.clip(x, -_HUGE, _HUGE)
+    return np.clip(x, -HUGE, HUGE)
 
     
 def hdot(x, A):
     return np.dot(x, np.dot(A, x))
-
-
-def safe_exp(x):
-    """
-    Returns a tuple (exp(x-xmax), xmax).
-    """
-    xmax = x.max()
-    return np.exp(x - xmax), xmax
 
 
 def decomp_sym_matrix(A):
@@ -61,59 +54,61 @@ def norminf(x):
     return np.max(np.abs(x))
 
 
-def to_float(x):
-    if x is None:
-        return None
-    else:
-        return float(x)
-
-
-def to_int(x):
-    if x is None:
-        return None
-    else:
-        return int(x)
-
 
 class SteepestDescent(object):
 
     def __init__(self, x, f, grad_f, hess_f=None,
                  maxiter=None, tol=1e-7,
                  stepsize=1., adaptive=True,
+                 damping=0,
                  proj=None,
                  verbose=False):
 
         self._generic_init('steepest',
                            x, f, grad_f, None,
                            maxiter, tol,
-                           stepsize, adaptive, proj,
+                           stepsize, adaptive,
+                           damping,
+                           proj,
                            verbose)
         self.run()
 
     def _generic_init(self, name,
                       x, f, grad_f, hess_f,
                       maxiter, tol,
-                      stepsize, adaptive, proj,
+                      stepsize, adaptive,
+                      damping,
+                      proj,
                       verbose):
         self._name = name
         self._x = np.asarray(x).ravel()
-        self._f = f
-        self._grad_f = grad_f
-        self._hess_f = hess_f
-        self._fval = self._f(self._x)
-        self._init_fval = self._fval
-        self._evals = np.array((1, 0, 0))
-        self._iterations = 0
-        self._maxiter = to_int(maxiter)
-        self._tol = to_float(tol)
-        self._stepsize = to_float(stepsize)
+        self._evals = np.array((0, 0, 0))
+        self._iter = 0
+        if maxiter is None:
+            self._maxiter = None
+        else:
+            self._maxiter = int(maxiter)
+        self._tol = float(tol)
+        self._stepsize = float(stepsize)
         self._adaptive = bool(adaptive)
+        self._damping = float(damping)
+        if self._damping is None or self._damping == 0:
+            self._f = f
+            self._grad_f = grad_f
+            self._hess_f = hess_f
+        else:
+            self._f = lambda x: f(x) + .5 * self._damping * np.sum(x ** 2)
+            self._grad_f = lambda x: grad_f(x) + self._damping * x
+            self._hess_f = lambda x: hess_f(x) + self._damping * np.eye(len(x))
         if proj is None:
             self._proj = lambda x: x
         else:
             self._proj = proj
         self._verbose = verbose
-
+        self._fval = self._f(self._x)
+        self._evals[0] += 1
+        self._init_fval = self._fval
+        
     def direction(self):
         dx = np.nan_to_num(-self._grad_f(self._x))
         self._evals[1] += 1
@@ -129,7 +124,6 @@ class SteepestDescent(object):
 
         stuck = False
         while not stuck:
-
             x0 = self._x
             fval0 = self._fval
             dx = self.direction()
@@ -156,11 +150,11 @@ class SteepestDescent(object):
                     a /= 2
                 if stuck:
                     break
-                
+            
             # Increase iteration number
-            self._iterations += 1
+            self._iter += 1
             if not self._maxiter is None:
-                if self._iterations > self._maxiter:
+                if self._iter > self._maxiter:
                     break
 
     def argmin(self):
@@ -170,7 +164,7 @@ class SteepestDescent(object):
         return 'Optimization complete (%s method).\n' % self._name \
             + ' Initial function value: %f\n' % self._init_fval\
             + ' Final function value: %f\n' % self._fval\
-            + ' Iterations: %d\n' % self._iterations\
+            + ' Iterations: %d\n' % self._iter\
             + ' Function evaluations: %d\n' % self._evals[0]\
             + ' Gradient evaluations: %d\n' % self._evals[1]\
             + ' Hessian evaluations: %d\n' % self._evals[2]\
@@ -183,12 +177,15 @@ class ConjugateDescent(SteepestDescent):
     def __init__(self, x, f, grad_f, hess_f=None,
                  maxiter=None, tol=1e-7,
                  stepsize=1., adaptive=True,
+                 damping=0,
                  proj=None,
                  verbose=False):
         self._generic_init('conjugate',
                            x, f, grad_f, None,
                            maxiter, tol,
-                           stepsize, adaptive, proj,
+                           stepsize, adaptive,
+                           damping,
+                           proj,
                            verbose)
         self._prev_dx = None
         self._prev_g = None
@@ -218,38 +215,45 @@ class NewtonDescent(SteepestDescent):
     def __init__(self, x, f, grad_f, hess_f,
                  maxiter=None, tol=1e-7,
                  stepsize=1., adaptive=True,
-                 damping=1e-10,
+                 damping=0,
                  proj=None,
                  verbose=False):
         self._generic_init('newton',
                            x, f, grad_f, hess_f,
                            maxiter, tol,
-                           stepsize, adaptive, proj,
+                           stepsize, adaptive,
+                           damping,
+                           proj,
                            verbose)
-        self._damping = to_float(damping)
         self.run()
         
     def direction(self):
-        """Compute the gradient g and Hessian H, then solve H dx = -g using
-        the Cholesky decomposition: H = L L.T
+        """
+        Compute the gradient g and Hessian H, then solve H dx = -g
+        using the Cholesky decomposition: H = L L.T
 
-        Upon failure, add a scalar matrix to the Hessian until the
-        Cholesky decomposition works.
+        If the Hessian is not positive definite, try to get the
+        direction from a regularized version of the cost function
+        using damping.
         """
         g = self._grad_f(self._x)
         H = self._hess_f(self._x)
         self._evals[1:3] += 1
-        Hr = H
-        damping = self._damping
+
+        gr = g
+        Hr = g
+        damping = 0
         while True:
-            try:        
+            try:
                 L, _ = cho_factor(Hr, lower=0)
-                dx = -cho_solve((L, 0), g)
+                dx = -cho_solve((L, 0), gr)
                 break
             except:
-                warn('Ooops... singular Hessian, regularizing')
-                Hr = H + damping * np.eye(H.shape[0])
-                damping *= 10
+                #print('Ooops... singular Hessian')
+                damping = 10 * max(TINY, damping)
+                gr = g + damping * self._x
+                Hr = H + damping * np.eye(len(self._x))
+
         return np.nan_to_num(dx)
 
 
@@ -258,6 +262,7 @@ class QuasiNewtonDescent(SteepestDescent):
     def __init__(self, x, f, grad_f, hess_f,
                  maxiter=None, tol=1e-7,
                  stepsize=1., adaptive=True,
+                 damping=0,
                  proj=None,
                  verbose=False):
         """
@@ -266,7 +271,9 @@ class QuasiNewtonDescent(SteepestDescent):
         self._generic_init('quasi_newton',
                            x, f, grad_f, None,
                            maxiter, tol,
-                           stepsize, adaptive, proj,
+                           stepsize, adaptive,
+                           damping,
+                           proj,
                            verbose)
         self._hess_inv = inv_sym_matrix(hess_f)
         self.run()
@@ -282,7 +289,7 @@ class ScipyCG(SteepestDescent):
 
     def __init__(self, x, f, grad_f, hess_f=None,
                  maxiter=None, tol=1e-7, verbose=False):
-        self._generic_init('cg', x, f, grad_f, None, maxiter, tol, None, None, None, verbose)
+        self._generic_init('cg', x, f, grad_f, None, maxiter, tol, None, None, None, None, verbose)
         self.run()
 
     @probe_time
@@ -300,7 +307,7 @@ class ScipyNCG(ScipyCG):
         
     def __init__(self, x, f, grad_f, hess_f=None,
                  maxiter=None, tol=1e-7, verbose=False):
-        self._generic_init('ncg', x, f, grad_f, hess_f, maxiter, tol, None, None, None, verbose)
+        self._generic_init('ncg', x, f, grad_f, hess_f, maxiter, tol, None, None, None, None, verbose)
         self._time = self.run()
 
     @probe_time
@@ -315,7 +322,7 @@ class ScipyBFGS(ScipyCG):
         
     def __init__(self, x, f, grad_f, hess_f=None,
                  maxiter=None, tol=1e-7, verbose=False):
-        self._generic_init('bfgs', x, f, grad_f, None, maxiter, tol, None, None, None, verbose)
+        self._generic_init('bfgs', x, f, grad_f, None, maxiter, tol, None, None, None, None, verbose)
         self._time = self.run()
 
     @probe_time
@@ -328,6 +335,7 @@ class ScipyBFGS(ScipyCG):
 def minimizer(name, x, f, grad_f, hess_f=None,
               maxiter=None, tol=1e-7,
               stepsize=1., adaptive=True, proj=None,
+              damping=0,
               verbose=False):
     """
     name must be one of 'steepest', 'conjugate', 'newton', 'quasi_newton', 'cg', 'ncg', 'bfgs'
@@ -342,11 +350,10 @@ def minimizer(name, x, f, grad_f, hess_f=None,
 
     if name not in min_obj.keys():
         raise ValueError('unknown minimizer')
-    elif name in ('cg', 'ncg', 'bfgs'):
-        return min_obj[name](x, f, grad_f, hess_f=hess_f, maxiter=maxiter, tol=tol, verbose=verbose)
-    else:
-        return min_obj[name](x, f, grad_f, hess_f=hess_f, maxiter=maxiter, tol=tol,
-                             stepsize=stepsize, adaptive=adaptive, proj=proj, verbose=verbose)
+    kwargs = {'maxiter': maxiter, 'tol': tol, 'verbose': verbose}
+    if name not in ('cg', 'ncg', 'bfgs'):
+        kwargs.update({'stepsize': stepsize, 'adaptive': adaptive, 'damping': damping, 'proj': proj})
+    return min_obj[name](x, f, grad_f, hess_f=hess_f, **kwargs)
 
 
 def approx_gradient(f, x, epsilon):
@@ -464,4 +471,6 @@ class CachedFunction(object):
 
 def sdot(A, B):
     return _sdot(A.astype(np.double), B.astype(np.double))
+
+
 
