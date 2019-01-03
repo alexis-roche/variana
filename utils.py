@@ -33,7 +33,7 @@ def force_tiny(x):
 def force_finite(x):
     return np.clip(x, -HUGE, HUGE)
 
-    
+
 def hdot(x, A):
     return np.dot(x, np.dot(A, x))
 

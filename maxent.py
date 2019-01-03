@@ -278,24 +278,23 @@ GAUSS_CONSTANT = .5 * np.log(2 * np.pi)
 
 
 def log_lik1d(z, m, s):
-    s = force_tiny(s)
     return -(GAUSS_CONSTANT + np.log(s) + .5 * ((z - m) / s) ** 2)
 
 
 def mean_log_lik1d(s):
-    s = force_tiny(s)
     return -(GAUSS_CONSTANT + np.log(s) + .5)
 
 
 class GaussianCompositeInference(MaxentClassifier):
 
-    def __init__(self, data, target, prior=None, supercomposite=False, homoscedastic=False):
+    def __init__(self, data, target, prior=None, supercomposite=False, homoscedastic=False, tiny=1e-3):
         """
         data (n, n_features)
         target (n, )
         """
         self._homoscedastic = bool(homoscedastic)
         self._supercomposite = bool(supercomposite)
+        self._tiny = float(tiny)
         self._init_dataset(data, target, prior)        
         self._init_training()
         self._init_basis(self._make_basis_generator())
@@ -312,7 +311,7 @@ class GaussianCompositeInference(MaxentClassifier):
         else:
             devs = np.array([np.sqrt(np.mean(res2[self._target == x], 0)) for x in range(targets)])
         self._means = means
-        self._devs = devs
+        self._devs = np.maximum(devs, self._tiny * np.max(devs))
 
     def _make_basis_generator(self):
         targets = len(self._prior)

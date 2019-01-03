@@ -3,14 +3,16 @@ import sys
 from variana.maxent import GaussianCompositeInference
 from variana.maxent import LogisticRegression as LogisticRegression2
 from sklearn.linear_model import LogisticRegression as LogisticRegression
-from sklearn.model_selection import train_test_split
 from sklearn import datasets
 import numpy as np
 import pylab as pl
 
 
 TEST_SIZE = 0.2
-METHOD = 'bfgs'
+POSITIVE_WEIGHTS = True
+HOMOSCEDASTIC = False
+SUPERCOMPOSITE = False
+
 
 def one_hot_encoding(target):
     out = np.zeros((len(target), target.max() + 1))
@@ -18,14 +20,20 @@ def one_hot_encoding(target):
     return out
 
 
-def load(dataset):
+def load(dataset, test_size=0.25, random_state=None):
     loaders = {'iris': datasets.load_iris,
                'digits': datasets.load_digits,
                'wine': datasets.load_wine,
                'breast_cancer': datasets.load_breast_cancer}
     data = loaders[dataset]()
-    return data.data, data.target
-
+    data, target = data.data, data.target
+    n = data.shape[0]
+    n_train = int((1 - test_size) * data.shape[0])
+    p = np.random.permutation(n)
+    train = p[0:n_train]
+    test = p[n_train:]
+    return data[train], target[train], data[test], target[test]
+    
 
 def cross_entropy(target, dist, tiny=1e-50):
     return -np.sum(one_hot_encoding(target) * np.log(np.maximum(tiny, dist))) / len(target)
@@ -36,52 +44,90 @@ def comparos(d1, d2):
     return np.mean(aux), np.argmax(aux)
 
 
-def checkos(lr, target, dist):
-    print('Cross-entropy variana = %f' % cross_entropy(target, lr.dist()))
-    g = lr2.gradient_dual(lr2.weight)
-    print('Grad test = %f' % np.max(np.abs(g)))
-    print('Comparison: %f, %d' % comparos(dist, dist2))
+class Evaluator(object):
 
+    def __init__(self, name, lr, data, target, t_data, t_target, **kwargs):
+        self._name = name
+        if isinstance(lr, LogisticRegression):
+            lr.fit(data, target, **kwargs)
+            self._dist = lr.predict_proba(data)
+            self._t_dist = lr.predict_proba(t_data)
+        else:
+            lr.fit(**kwargs)
+            self._dist = lr.dist()
+            self._t_dist = lr.dist(t_data)
+        self._cross_entropy = cross_entropy(target, self._dist)
+        self._t_cross_entropy = cross_entropy(t_target, self._t_dist)
+        self._lr = lr
+        
+    @property
+    def train_cross_entropy(self):
+        return self._cross_entropy
+
+    @property
+    def test_cross_entropy(self):
+        return self._t_cross_entropy
+
+    def disp(self):
+        print('Train cross-entropy %s = %f' % (self._name, self.train_cross_entropy))
+        print('Test cross-entropy %s = %f' % (self._name, self.test_cross_entropy))
+
+    def compare(self, other):
+        print('Comparison (%s/%s): %f, %d' % (self._name, other._name, *comparos(self._dist, other._dist)))
+    
+    def grad_test(self):
+        if isinstance(self._lr, LogisticRegression):
+            print('No grad test available for sklearn implementation')
+            return
+        g = self._lr.gradient_dual(self._lr.weight)
+        print('Grad test = %f' % np.max(np.abs(g)))
+        
     
 dataset = 'iris'
+method = 'newton'
 if len(sys.argv) > 1:
     dataset = sys.argv[1]
+    if len(sys.argv) > 2:
+        method = sys.argv[2]
 
-data, target = load(dataset)
+data, target, t_data, t_target = load(dataset, test_size=TEST_SIZE)
 
 
 print('*************************************')
-print('Logistic regression (sklearn)')
 lr = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='multinomial')
-lr.fit(data, target)
-dist = lr.predict_proba(data)
-print('Cross-entropy sklearn = %f' % cross_entropy(target, dist))
+elr = Evaluator('sklearn', lr, data, target, t_data, t_target)
+elr.disp()
 
 print('*************************************')
-print('Logistic regression (variana)')
 lr2 = LogisticRegression2(data, target)
-lr2.fit(method=METHOD)
-dist2 = lr2.dist()
-checkos(lr2, target, dist)
+elr2 = Evaluator('variana', lr2, data, target, t_data, t_target, method=method)
+elr2.grad_test()
+elr2.compare(elr)
+elr2.disp()
+
 
 print('*************************************')
-print('Composite Inference')
-lr3 = GaussianCompositeInference(data, target)
-lr3.fit(method=METHOD)
-dist3 = lr3.dist()
-checkos(lr3, target, dist2)
+lr3 = GaussianCompositeInference(data, target,
+                                 homoscedastic=HOMOSCEDASTIC,
+                                 supercomposite=SUPERCOMPOSITE)
+elr3 = Evaluator('composite', lr3, data, target, t_data, t_target, method=method,
+                 positive_weights=POSITIVE_WEIGHTS)
+elr3.grad_test()
+elr3.compare(elr)
+elr3.compare(elr2)
+elr3.disp()
 
 
 def zob(idx):
     pl.figure()
-    pl.plot(dist[idx, :], 'b:')
+    pl.plot(elr._dist[idx, :], 'b:')
     try:
-        pl.plot(dist2[idx, :], 'g')
+        pl.plot(elr2._dist[idx, :], 'b')
     except:
-        print('dist2 does not exist')
+        print('elr2 does not exist')
     try:
-        pl.plot(dist3[idx, :], 'orange')
+        pl.plot(elr3._dist[idx, :], 'orange')
     except:
-        print('dist3 does not exist')
+        print('elr3 does not exist')
     pl.show()
 
