@@ -59,7 +59,7 @@ class SteepestDescent(object):
 
     def __init__(self, x, f, grad_f, hess_f=None,
                  maxiter=None, tol=1e-7,
-                 stepsize=1., adaptive=True,
+                 stepsize=1, adaptive=True,
                  damping=0,
                  proj=None,
                  verbose=False):
@@ -67,19 +67,21 @@ class SteepestDescent(object):
         self._generic_init('steepest',
                            x, f, grad_f, None,
                            maxiter, tol,
-                           stepsize, adaptive,
-                           damping,
-                           proj,
-                           verbose)
+                           stepsize=stepsize,
+                           adaptive=adaptive,
+                           damping=damping,
+                           proj=proj,
+                           verbose=verbose)
         self.run()
 
     def _generic_init(self, name,
                       x, f, grad_f, hess_f,
                       maxiter, tol,
-                      stepsize, adaptive,
-                      damping,
-                      proj,
-                      verbose):
+                      stepsize=1,
+                      adaptive=False,
+                      damping=0,
+                      proj=None,
+                      verbose=False):
         self._name = name
         self._x = np.asarray(x).ravel()
         self._evals = np.array((0, 0, 0))
@@ -176,17 +178,18 @@ class ConjugateDescent(SteepestDescent):
 
     def __init__(self, x, f, grad_f, hess_f=None,
                  maxiter=None, tol=1e-7,
-                 stepsize=1., adaptive=True,
+                 stepsize=1, adaptive=True,
                  damping=0,
                  proj=None,
                  verbose=False):
         self._generic_init('conjugate',
                            x, f, grad_f, None,
                            maxiter, tol,
-                           stepsize, adaptive,
-                           damping,
-                           proj,
-                           verbose)
+                           stepsize=stepsize,
+                           adaptive=adaptive,
+                           damping=damping,
+                           proj=proj,
+                           verbose=verbose)
         self._prev_dx = None
         self._prev_g = None
         self.run()
@@ -214,17 +217,18 @@ class NewtonDescent(SteepestDescent):
 
     def __init__(self, x, f, grad_f, hess_f,
                  maxiter=None, tol=1e-7,
-                 stepsize=1., adaptive=True,
+                 stepsize=1, adaptive=True,
                  damping=0,
                  proj=None,
                  verbose=False):
         self._generic_init('newton',
                            x, f, grad_f, hess_f,
                            maxiter, tol,
-                           stepsize, adaptive,
-                           damping,
-                           proj,
-                           verbose)
+                           stepsize=stepsize,
+                           adaptive=adaptive,
+                           damping=damping,
+                           proj=proj,
+                           verbose=verbose)
         self.run()
         
     def direction(self):
@@ -261,7 +265,7 @@ class QuasiNewtonDescent(SteepestDescent):
 
     def __init__(self, x, f, grad_f, hess_f,
                  maxiter=None, tol=1e-7,
-                 stepsize=1., adaptive=True,
+                 stepsize=1, adaptive=True,
                  damping=0,
                  proj=None,
                  verbose=False):
@@ -271,10 +275,11 @@ class QuasiNewtonDescent(SteepestDescent):
         self._generic_init('quasi_newton',
                            x, f, grad_f, None,
                            maxiter, tol,
-                           stepsize, adaptive,
-                           damping,
-                           proj,
-                           verbose)
+                           stepsize=stepsize,
+                           adaptive=adaptive,
+                           damping=damping,
+                           proj=proj,
+                           verbose=verbose)
         self._hess_inv = inv_sym_matrix(hess_f)
         self.run()
         
@@ -289,7 +294,7 @@ class ScipyCG(SteepestDescent):
 
     def __init__(self, x, f, grad_f, hess_f=None,
                  maxiter=None, tol=1e-7, verbose=False):
-        self._generic_init('cg', x, f, grad_f, None, maxiter, tol, None, None, None, None, verbose)
+        self._generic_init('cg', x, f, grad_f, None, maxiter, tol, verbose=verbose)
         self.run()
 
     @probe_time
@@ -307,7 +312,7 @@ class ScipyNCG(ScipyCG):
         
     def __init__(self, x, f, grad_f, hess_f=None,
                  maxiter=None, tol=1e-7, verbose=False):
-        self._generic_init('ncg', x, f, grad_f, hess_f, maxiter, tol, None, None, None, None, verbose)
+        self._generic_init('ncg', x, f, grad_f, hess_f, maxiter, tol, verbose=verbose)
         self._time = self.run()
 
     @probe_time
@@ -322,7 +327,7 @@ class ScipyBFGS(ScipyCG):
         
     def __init__(self, x, f, grad_f, hess_f=None,
                  maxiter=None, tol=1e-7, verbose=False):
-        self._generic_init('bfgs', x, f, grad_f, None, maxiter, tol, None, None, None, None, verbose)
+        self._generic_init('bfgs', x, f, grad_f, None, maxiter, tol, verbose=verbose)
         self._time = self.run()
 
     @probe_time
@@ -334,7 +339,7 @@ class ScipyBFGS(ScipyCG):
 
 def minimizer(name, x, f, grad_f, hess_f=None,
               maxiter=None, tol=1e-7,
-              stepsize=1., adaptive=True, proj=None,
+              stepsize=1, adaptive=True, proj=None,
               damping=0,
               verbose=False):
     """

@@ -10,7 +10,7 @@ import pylab as pl
 
 
 TEST_SIZE = 0.2
-
+METHOD = 'bfgs'
 
 def one_hot_encoding(target):
     out = np.zeros((len(target), target.max() + 1))
@@ -60,14 +60,14 @@ print('Cross-entropy sklearn = %f' % cross_entropy(target, dist))
 print('*************************************')
 print('Logistic regression (variana)')
 lr2 = LogisticRegression2(data, target)
-lr2.fit()
+lr2.fit(method=METHOD)
 dist2 = lr2.dist()
 checkos(lr2, target, dist)
 
 print('*************************************')
 print('Composite Inference')
 lr3 = GaussianCompositeInference(data, target)
-lr3.fit()
+lr3.fit(method=METHOD)
 dist3 = lr3.dist()
 checkos(lr3, target, dist2)
 
