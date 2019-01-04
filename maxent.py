@@ -24,8 +24,7 @@ class Maxent(object):
             self._basis = self._basis[:, None]
 
     def _init_optimizer(self):
-        moments = self._basis.shape[-1]
-        self._lda = np.zeros(moments)
+        self.set_weight(0)
         self._udist = CachedFunction(self.__udist)
         self._udist_basis = CachedFunction(self.__udist_basis)
         self._z = CachedFunction(self.__z)
@@ -76,7 +75,7 @@ class Maxent(object):
 
     def fit(self, method='newton', positive_weights=False, weight=None, **kwargs):
         if not weight is None:
-            self._lda = np.asarray(weight)
+            self.set_weight(weight)
         f = lambda lda: -self.dual(lda)
         grad_f = lambda lda: -self.gradient_dual(lda)
         hess_f = lambda lda: -self.hessian_dual(lda)
@@ -99,6 +98,15 @@ class Maxent(object):
     @property
     def weight(self):
         return self._lda
+
+    def set_weight(self, weight):
+        moments = self._basis.shape[-1]
+        weight = np.asarray(weight)
+        if weight.ndim == 0:
+            weight = np.full(moments, float(weight))
+        if len(weight) != moments:
+            raise ValueError('Inconsistent weight length')
+        self._lda = weight
 
     @property
     def prior(self):
@@ -169,8 +177,7 @@ class ConditionalMaxent(Maxent):
         self._basis = basis_generator(self._data)
         
     def _init_optimizer(self):
-        moments = self._basis.shape[-1]
-        self._lda = np.zeros(moments)
+        self.set_weight(0) 
         self._udist = CachedFunction(self.__udist)
         self._udist_basis = CachedFunction(self.__udist_basis)
         self._z = CachedFunction(self.__z)

@@ -9,6 +9,7 @@ import pylab as pl
 
 
 TEST_SIZE = 0.2
+TOL = 1e-20
 POSITIVE_WEIGHTS = True
 HOMOSCEDASTIC = False
 SUPERCOMPOSITE = False
@@ -35,6 +36,10 @@ def load(dataset, test_size=0.25, random_state=None):
     return data[train], target[train], data[test], target[test]
     
 
+def accuracy(target, dist):
+    return np.sum(target == np.argmax(dist, 1)) / len(target)
+
+
 def cross_entropy(target, dist, tiny=1e-50):
     return -np.sum(one_hot_encoding(target) * np.log(np.maximum(tiny, dist))) / len(target)
 
@@ -46,18 +51,18 @@ def comparos(d1, d2):
 
 class Evaluator(object):
 
-    def __init__(self, name, lr, data, target, t_data, t_target, **kwargs):
+    def __init__(self, name, lr, data, target, t_data, t_target):
         self._name = name
         if isinstance(lr, LogisticRegression):
-            lr.fit(data, target, **kwargs)
             self._dist = lr.predict_proba(data)
             self._t_dist = lr.predict_proba(t_data)
         else:
-            lr.fit(**kwargs)
             self._dist = lr.dist()
             self._t_dist = lr.dist(t_data)
         self._cross_entropy = cross_entropy(target, self._dist)
         self._t_cross_entropy = cross_entropy(t_target, self._t_dist)
+        self._accuracy = accuracy(target, self._dist)
+        self._t_accuracy = accuracy(t_target, self._t_dist)
         self._lr = lr
         
     @property
@@ -68,14 +73,27 @@ class Evaluator(object):
     def test_cross_entropy(self):
         return self._t_cross_entropy
 
-    def disp(self):
-        print('Train cross-entropy %s = %f' % (self._name, self.train_cross_entropy))
-        print('Test cross-entropy %s = %f' % (self._name, self.test_cross_entropy))
+    @property
+    def train_accuracy(self):
+        return self._accuracy
 
-    def compare(self, other):
+    @property
+    def test_accuracy(self):
+        return self._t_accuracy
+
+    def disp(self, compare=(), grad_test=False):
+        print('************ %s' % self._name)
+        print('Train cross-entropy = %f, accuracy = %f' % (self.train_cross_entropy, self.train_accuracy))
+        print('Test cross-entropy = %f, accuracy = %f' % (self.test_cross_entropy, self.test_accuracy))
+        for other in compare:
+            self.disp_compare(other)
+        if grad_test:
+            self.disp_grad_test()
+        
+    def disp_compare(self, other):
         print('Comparison (%s/%s): %f, %d' % (self._name, other._name, *comparos(self._dist, other._dist)))
     
-    def grad_test(self):
+    def disp_grad_test(self):
         if isinstance(self._lr, LogisticRegression):
             print('No grad test available for sklearn implementation')
             return
@@ -93,30 +111,37 @@ if len(sys.argv) > 1:
 data, target, t_data, t_target = load(dataset, test_size=TEST_SIZE)
 
 
-print('*************************************')
-lr = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='multinomial')
+lr = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='multinomial', max_iter=1000)
+lr.fit(data, target)
 elr = Evaluator('sklearn', lr, data, target, t_data, t_target)
 elr.disp()
 
-print('*************************************')
 lr2 = LogisticRegression2(data, target)
-elr2 = Evaluator('variana', lr2, data, target, t_data, t_target, method=method)
-elr2.grad_test()
-elr2.compare(elr)
-elr2.disp()
+lr2.fit(method=method, tol=TOL)
+elr2 = Evaluator('variana', lr2, data, target, t_data, t_target)
+elr2.disp(compare=(elr,), grad_test=True)
 
-
-print('*************************************')
 lr3 = GaussianCompositeInference(data, target,
                                  homoscedastic=HOMOSCEDASTIC,
                                  supercomposite=SUPERCOMPOSITE)
-elr3 = Evaluator('composite', lr3, data, target, t_data, t_target, method=method,
-                 positive_weights=POSITIVE_WEIGHTS)
-elr3.grad_test()
-elr3.compare(elr)
-elr3.compare(elr2)
-elr3.disp()
 
+lr3.set_weight(1)
+jc = Evaluator('naive', lr3, data, target, t_data, t_target)
+jc.disp()
+lr3.set_weight(1 / len(lr3.weight))
+jc2 = Evaluator('e-bayes', lr3, data, target, t_data, t_target)
+jc2.disp()
+
+lr3.fit(method=method, tol=TOL, positive_weights=POSITIVE_WEIGHTS)
+elr3 = Evaluator('composite', lr3, data, target, t_data, t_target)
+elr3.disp(compare=(elr, elr2), grad_test=True)
+
+print()
+print('Number of classes: %d' % (1 + target.max()))
+print('Number of features: %d' % data.shape[1])
+print('Number of examples: %d' % data.shape[0])
+print('Logistic regression parameters: %d' % len(lr2.weight))
+print('Composite inference parameters: %d' % len(lr3.weight))
 
 def zob(idx):
     pl.figure()
