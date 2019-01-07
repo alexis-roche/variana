@@ -10,7 +10,7 @@ import pylab as pl
 
 TEST_SIZE = 0.2
 TOL = 1e-20
-POSITIVE_WEIGHTS = True
+POSITIVE_WEIGHTS = False
 HOMOSCEDASTIC = False
 SUPERCOMPOSITE = False
 
@@ -102,7 +102,7 @@ class Evaluator(object):
         
     
 dataset = 'iris'
-method = 'newton'
+method = 'lbfgs'
 if len(sys.argv) > 1:
     dataset = sys.argv[1]
     if len(sys.argv) > 2:
@@ -117,7 +117,7 @@ elr = Evaluator('sklearn', lr, data, target, t_data, t_target)
 elr.disp()
 
 lr2 = LogisticRegression2(data, target)
-lr2.fit(method=method, tol=TOL)
+lr2.fit(method='lbfgs', tol=TOL)
 elr2 = Evaluator('variana', lr2, data, target, t_data, t_target)
 elr2.disp(compare=(elr,), grad_test=True)
 

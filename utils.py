@@ -7,7 +7,7 @@ from ._utils import _sdot
 from time import time
 import numpy as np
 from scipy.linalg import cho_factor, cho_solve, eigh
-from scipy.optimize import fmin_cg, fmin_ncg, fmin_bfgs
+from scipy.optimize import fmin_cg, fmin_ncg, fmin_bfgs, fmin_l_bfgs_b
 
 
 TINY = 1e-10
@@ -58,32 +58,36 @@ def norminf(x):
 class SteepestDescent(object):
 
     def __init__(self, x, f, grad_f, hess_f=None,
+                 args=(),
                  maxiter=None, tol=1e-7,
                  stepsize=1, adaptive=True,
                  damping=0,
                  proj=None,
                  verbose=False):
 
-        self._generic_init('steepest',
-                           x, f, grad_f, None,
-                           maxiter, tol,
-                           stepsize=stepsize,
-                           adaptive=adaptive,
-                           damping=damping,
-                           proj=proj,
-                           verbose=verbose)
+        self._genit('steepest',
+                    x, f, grad_f, None,
+                    args,
+                    maxiter, tol,
+                    stepsize=stepsize,
+                    adaptive=adaptive,
+                    damping=damping,
+                    proj=proj,
+                    verbose=verbose)
         self.run()
 
-    def _generic_init(self, name,
-                      x, f, grad_f, hess_f,
-                      maxiter, tol,
-                      stepsize=1,
-                      adaptive=False,
-                      damping=0,
-                      proj=None,
-                      verbose=False):
+    def _genit(self, name,
+               x, f, grad_f, hess_f,
+               args,
+               maxiter, tol,
+               stepsize=1,
+               adaptive=False,
+               damping=0,
+               proj=None,
+               verbose=False):
         self._name = name
         self._x = np.asarray(x).ravel()
+        self._args = args
         self._evals = np.array((0, 0, 0))
         self._iter = 0
         if maxiter is None:
@@ -94,25 +98,25 @@ class SteepestDescent(object):
         self._stepsize = float(stepsize)
         self._adaptive = bool(adaptive)
         self._damping = float(damping)
-        if self._damping is None or self._damping == 0:
+        if self._damping == 0:
             self._f = f
             self._grad_f = grad_f
             self._hess_f = hess_f
         else:
-            self._f = lambda x: f(x) + .5 * self._damping * np.sum(x ** 2)
-            self._grad_f = lambda x: grad_f(x) + self._damping * x
-            self._hess_f = lambda x: hess_f(x) + self._damping * np.eye(len(x))
+            self._f = lambda x, *args: f(x, *args) + .5 * self._damping * np.sum(x ** 2)
+            self._grad_f = lambda x, *args: grad_f(x, *args) + self._damping * x
+            self._hess_f = lambda x, *args: hess_f(x, *args) + self._damping * np.eye(len(x))
         if proj is None:
             self._proj = lambda x: x
         else:
             self._proj = proj
         self._verbose = verbose
-        self._fval = self._f(self._x)
+        self._fval = self._f(self._x, *self._args)
         self._evals[0] += 1
         self._init_fval = self._fval
         
     def direction(self):
-        dx = np.nan_to_num(-self._grad_f(self._x))
+        dx = np.nan_to_num(-self._grad_f(self._x, *self._args))
         self._evals[1] += 1
         return dx
 
@@ -137,7 +141,7 @@ class SteepestDescent(object):
             while not done:
                 stuck = (a * norm_dx) < self._tol
                 x = np.nan_to_num(self._proj(x0 + a * dx))
-                fval = self._f(x)
+                fval = self._f(x, *self._args)
                 self._evals[0] += 1
                 if fval < self._fval:
                     lucky = True
@@ -177,19 +181,21 @@ class SteepestDescent(object):
 class ConjugateDescent(SteepestDescent):
 
     def __init__(self, x, f, grad_f, hess_f=None,
+                 args=(),
                  maxiter=None, tol=1e-7,
                  stepsize=1, adaptive=True,
                  damping=0,
                  proj=None,
                  verbose=False):
-        self._generic_init('conjugate',
-                           x, f, grad_f, None,
-                           maxiter, tol,
-                           stepsize=stepsize,
-                           adaptive=adaptive,
-                           damping=damping,
-                           proj=proj,
-                           verbose=verbose)
+        self._genit('conjugate',
+                    x, f, grad_f, None,
+                    args,
+                    maxiter, tol,
+                    stepsize=stepsize,
+                    adaptive=adaptive,
+                    damping=damping,
+                    proj=proj,
+                    verbose=verbose)
         self._prev_dx = None
         self._prev_g = None
         self.run()
@@ -199,7 +205,7 @@ class ConjugateDescent(SteepestDescent):
         Polak-Ribiere rule. Reset direction if beta < 0 or if
         objective increases along proposed direction.
         """
-        g = self._grad_f(self._x)
+        g = self._grad_f(self._x, *self._args)
         self._evals[1] += 1
         if self._prev_dx is None:
             dx = -g
@@ -216,19 +222,21 @@ class ConjugateDescent(SteepestDescent):
 class NewtonDescent(SteepestDescent):
 
     def __init__(self, x, f, grad_f, hess_f,
+                 args=(),
                  maxiter=None, tol=1e-7,
                  stepsize=1, adaptive=True,
                  damping=0,
                  proj=None,
                  verbose=False):
-        self._generic_init('newton',
-                           x, f, grad_f, hess_f,
-                           maxiter, tol,
-                           stepsize=stepsize,
-                           adaptive=adaptive,
-                           damping=damping,
-                           proj=proj,
-                           verbose=verbose)
+        self._genit('newton',
+                    x, f, grad_f, hess_f,
+                    args,
+                    maxiter, tol,
+                    stepsize=stepsize,
+                    adaptive=adaptive,
+                    damping=damping,
+                    proj=proj,
+                    verbose=verbose)
         self.run()
         
     def direction(self):
@@ -240,8 +248,8 @@ class NewtonDescent(SteepestDescent):
         direction from a regularized version of the cost function
         using damping.
         """
-        g = self._grad_f(self._x)
-        H = self._hess_f(self._x)
+        g = self._grad_f(self._x, *self._args)
+        H = self._hess_f(self._x, *self._args)
         self._evals[1:3] += 1
 
         gr = g
@@ -264,6 +272,7 @@ class NewtonDescent(SteepestDescent):
 class QuasiNewtonDescent(SteepestDescent):
 
     def __init__(self, x, f, grad_f, hess_f,
+                 args=(),
                  maxiter=None, tol=1e-7,
                  stepsize=1, adaptive=True,
                  damping=0,
@@ -272,19 +281,20 @@ class QuasiNewtonDescent(SteepestDescent):
         """
         Assume fix hessian
         """
-        self._generic_init('quasi_newton',
-                           x, f, grad_f, None,
-                           maxiter, tol,
-                           stepsize=stepsize,
-                           adaptive=adaptive,
-                           damping=damping,
-                           proj=proj,
-                           verbose=verbose)
+        self._genit('quasi_newton',
+                    x, f, grad_f, None,
+                    args,
+                    maxiter, tol,
+                    stepsize=stepsize,
+                    adaptive=adaptive,
+                    damping=damping,
+                    proj=proj,
+                    verbose=verbose)
         self._hess_inv = inv_sym_matrix(hess_f)
         self.run()
         
     def direction(self):
-        g = self._grad_f(self._x)
+        g = self._grad_f(self._x, *self._args)
         self._evals[1] += 1
         dx = -np.dot(self._hess_inv, g)
         return np.nan_to_num(dx)
@@ -292,14 +302,15 @@ class QuasiNewtonDescent(SteepestDescent):
 
 class ScipyCG(SteepestDescent):
 
-    def __init__(self, x, f, grad_f, hess_f=None,
+    def __init__(self, x, f, grad_f, hess_f=None, args=(),
                  maxiter=None, tol=1e-7, verbose=False):
-        self._generic_init('cg', x, f, grad_f, None, maxiter, tol, verbose=verbose)
+        self._genit('cg', x, f, grad_f, None, args, maxiter, tol, verbose=verbose)
         self.run()
 
     @probe_time
     def _run(self):
         self._x, self._fval = fmin_cg(self._f, self._x, fprime=self._grad_f,
+                                      args=self._args,
                                       gtol=self._tol, maxiter=self._maxiter, 
                                       full_output=True, disp=self._verbose)[0:2]
 
@@ -310,14 +321,15 @@ class ScipyCG(SteepestDescent):
         
 class ScipyNCG(ScipyCG):
         
-    def __init__(self, x, f, grad_f, hess_f=None,
+    def __init__(self, x, f, grad_f, hess_f=None, args=(),
                  maxiter=None, tol=1e-7, verbose=False):
-        self._generic_init('ncg', x, f, grad_f, hess_f, maxiter, tol, verbose=verbose)
+        self._genit('ncg', x, f, grad_f, hess_f, args, maxiter, tol, verbose=verbose)
         self._time = self.run()
 
     @probe_time
     def _run(self):
         self._x, self._fval = fmin_ncg(self._f, self._x, fprime=self._grad_f,
+                                       args=self._args,
                                        fhess=self._hess_f,
                                        avextol=self._tol, maxiter=self._maxiter, 
                                        full_output=True, disp=self._verbose)[0:2]
@@ -325,25 +337,43 @@ class ScipyNCG(ScipyCG):
         
 class ScipyBFGS(ScipyCG):
         
-    def __init__(self, x, f, grad_f, hess_f=None,
+    def __init__(self, x, f, grad_f, hess_f=None, args=(),
                  maxiter=None, tol=1e-7, verbose=False):
-        self._generic_init('bfgs', x, f, grad_f, None, maxiter, tol, verbose=verbose)
+        self._genit('bfgs', x, f, grad_f, None, args, maxiter, tol, verbose=verbose)
         self._time = self.run()
 
     @probe_time
     def _run(self):
         self._x, self._fval = fmin_bfgs(self._f, self._x, fprime=self._grad_f,
+                                        args=self._args,
                                         gtol=self._tol, maxiter=self._maxiter, 
                                         full_output=True, disp=self._verbose)[0:2]
 
+class ScipyLBFGS(ScipyCG):
+        
+    def __init__(self, x, f, grad_f, hess_f=None, args=(),
+                 maxiter=None, tol=1e-7, verbose=False):
+        if maxiter is None:
+            maxiter = 15000
+        self._genit('lbfgs', x, f, grad_f, None, args, maxiter, tol, verbose=verbose)
+        self._time = self.run()
+
+    @probe_time
+    def _run(self):
+        self._x, self._fval = fmin_l_bfgs_b(self._f, self._x, fprime=self._grad_f,
+                                            args=self._args,
+                                            pgtol=self._tol, maxiter=self._maxiter,
+                                            disp=self._verbose)[0:2]
+
 
 def minimizer(name, x, f, grad_f, hess_f=None,
+              args=(),
               maxiter=None, tol=1e-7,
               stepsize=1, adaptive=True, proj=None,
               damping=0,
               verbose=False):
     """
-    name must be one of 'steepest', 'conjugate', 'newton', 'quasi_newton', 'cg', 'ncg', 'bfgs'
+    name must be one of 'steepest', 'conjugate', 'newton', 'quasi_newton', 'cg', 'ncg', 'bfgs', 'lbfgs'
     """
     min_obj = {'steepest': SteepestDescent,
                'conjugate': ConjugateDescent,
@@ -351,17 +381,18 @@ def minimizer(name, x, f, grad_f, hess_f=None,
                'quasi_newton': QuasiNewtonDescent,
                'cg': ScipyCG,
                'ncg': ScipyNCG,
-               'bfgs': ScipyBFGS}
+               'bfgs': ScipyBFGS,
+               'lbfgs': ScipyLBFGS}
 
     if name not in min_obj.keys():
         raise ValueError('unknown minimizer')
-    kwargs = {'maxiter': maxiter, 'tol': tol, 'verbose': verbose}
-    if name not in ('cg', 'ncg', 'bfgs'):
+    kwargs = {'args': args, 'maxiter': maxiter, 'tol': tol, 'verbose': verbose}
+    if name not in ('cg', 'ncg', 'bfgs', 'lbfgs'):
         kwargs.update({'stepsize': stepsize, 'adaptive': adaptive, 'damping': damping, 'proj': proj})
     return min_obj[name](x, f, grad_f, hess_f=hess_f, **kwargs)
 
 
-def approx_gradient(f, x, epsilon):
+def approx_gradient(f, x, epsilon, args=()):
     """
     Approximate the gradient of a function using central finite
     differences
@@ -388,12 +419,12 @@ def approx_gradient(f, x, epsilon):
     ei = np.zeros(n)
     for i in range(n):
         ei[i] = .5 * epsilon
-        g[i, :] = (f((x.T + ei).T) - f((x.T - ei).T)) / epsilon
+        g[i, :] = (f((x.T + ei).T, *args) - f((x.T - ei).T), *args) / epsilon
         ei[i] = 0
     return g.squeeze()
 
 
-def approx_hessian_diag(f, x, epsilon):
+def approx_hessian_diag(f, x, epsilon, args=()):
     """
     Approximate the Hessian diagonal of a function using central
     finite differences
@@ -418,15 +449,15 @@ def approx_hessian_diag(f, x, epsilon):
         npts = x.shape[1]
     h = np.zeros((n, npts))
     ei = np.zeros(n)
-    fx = f(x)
+    fx = f(x, *args)
     for i in range(n):
         ei[i] = epsilon
-        h[i, :] = (f((x.T + ei).T) + f((x.T - ei).T) - 2 * fx) / (epsilon ** 2)
+        h[i, :] = (f((x.T + ei).T, *args) + f((x.T - ei).T, *args) - 2 * fx) / (epsilon ** 2)
         ei[i] = 0
     return h.squeeze()
 
 
-def approx_hessian(f, x, epsilon):
+def approx_hessian(f, x, epsilon, args=()):
     """
     Approximate the full Hessian matrix of a function using central
     finite differences
@@ -453,8 +484,8 @@ def approx_hessian(f, x, epsilon):
     ei = np.zeros(n)
     for i in range(n):
         ei[i] = .5 * epsilon
-        g1 = approx_gradient(f, (x.T + ei).T, epsilon)
-        g2 = approx_gradient(f, (x.T - ei).T, epsilon)
+        g1 = approx_gradient(f, (x.T + ei).T, epsilon, args=args)
+        g2 = approx_gradient(f, (x.T - ei).T, epsilon, args=args)
         H[i, ...] = (g1 - g2) / epsilon
         ei[i] = 0
     return H.squeeze()
@@ -478,4 +509,6 @@ def sdot(A, B):
     return _sdot(A.astype(np.double), B.astype(np.double))
 
 
-
+# This function returns the memory block address of an array.
+def aid(x):
+    return x.__array_interface__['data'][0]

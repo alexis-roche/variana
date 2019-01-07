@@ -41,7 +41,7 @@ target = np.random.randint(CLASSES, size=SIZE)
 data = true_means[target] +  generate_noise(SIZE, FEATURES, FEATURE_CORRELATION) * true_devs[target]
 
 m = GaussianCompositeInference(data, target, prior=PRIOR, supercomposite=SUPERCOMPOSITE, homoscedastic=HOMOSCEDASTIC)
-m.fit(positive_weights=POSITIVE_WEIGHTS, verbose=True)
+m.fit(positive_weights=POSITIVE_WEIGHTS)
 
 
 ###################

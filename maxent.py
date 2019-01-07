@@ -1,20 +1,56 @@
 import numpy as np
 import scipy.optimize as spo
 
-from .utils import sdot, minimizer, CachedFunction, force_tiny
+from .utils import sdot, minimizer, aid
+
+
+
+class MaxentCache(object):
+
+    def __init__(self):
+        self._lda = None
+        self._udist = None
+        self._norma = None
+        self._z = None
+        self._udist_basis = None
+        self._grad_z = None
+
+    def same(self, lda):
+        return np.array_equal(lda, self._lda)
+        
+    def update_z(self, lda, norma, udist, z):
+        # If lda has been modified in place, we need to copy it
+        if self._lda is None:
+            self._lda = lda
+        elif aid(lda) == aid(self._lda):
+            self._lda = lda.copy()
+        else:
+            self._lda = lda
+        self._lda = lda.copy()
+        self._udist = udist
+        self._norma = norma
+        self._z = z
+        self._udist_basis = None
+        self._grad_z = None
+
+    def update_grad_z(self, lda, udist_basis, grad_z):
+        if not self.same(lda):
+            raise ValueError('Cannot run update_grad_z before update_z')
+        self._udist_basis = udist_basis
+        self._grad_z = grad_z
 
 
 
 class Maxent(object):
 
-    def __init__(self, basis, moment, prior=None):
+    def __init__(self, basis, moment, prior=None, tiny=1e-100):
         """
         basis is an array (targets, moments)
         moment is a sequence of mean values corresponding to basis
         prior is None or an array-like reperesenting the prior
         """
         self._init_basis(basis)
-        self._init_optimizer()
+        self._init_optimizer(tiny)
         self._init_prior(prior)
         self._init_moment(moment)
 
@@ -23,13 +59,11 @@ class Maxent(object):
         if self._basis.ndim == 1:
             self._basis = self._basis[:, None]
 
-    def _init_optimizer(self):
+    def _init_optimizer(self, tiny):
+        self._tiny = float(tiny)
         self.set_weight(0)
-        self._udist = CachedFunction(self.__udist)
-        self._udist_basis = CachedFunction(self.__udist_basis)
-        self._z = CachedFunction(self.__z)
-        self._gradient_z = CachedFunction(self.__gradient_z)
-
+        self._cache = MaxentCache()
+        
     def _init_prior(self, prior):
         if prior is None:
             self._prior = np.ones(self._basis.shape[-2])
@@ -42,38 +76,39 @@ class Maxent(object):
         if self._moment.ndim == 0:
             self._moment = self._moment[None]
 
-    def __udist(self, lda):
+    def _compute_z(self, lda):
+        if self._cache.same(lda):
+            return
         aux = np.dot(self._basis, lda)
         norma = aux.max()
-        return self._prior * np.exp(aux - norma), norma
-        
-    def __udist_basis(self, lda):
-        return self._udist(lda)[0][:, None] * self._basis
-            
-    def __z(self, lda):
-        udist, norma = self._udist(lda)
-        return np.sum(udist), norma
+        udist = self._prior * np.exp(aux - norma)
+        z = np.sum(udist)
+        self._cache.update_z(lda, norma, udist, z)
 
-    def __gradient_z(self, lda):
-        return np.sum(self._udist_basis(lda), 0)
-    
-    def _hessian_z(self, lda):
-        return np.dot(self._udist_basis(lda).T, self._basis)
-        
+    def _compute_z_and_grad(self, lda):
+        self._compute_z(lda)
+        if not self._cache._grad_z is None:
+            return
+        udist_basis = self._cache._udist[:, None] * self._basis
+        grad_z = np.sum(udist_basis, 0)
+        self._cache.update_grad_z(lda, udist_basis, grad_z)
+
     def dual(self, lda):
-        z, norma = self._z(lda)
-        return np.dot(lda, self._moment) - np.log(force_tiny(z)) - norma
+        self._compute_z(lda)
+        return np.dot(lda, self._moment) - np.log(np.maximum(self._cache._z, self._tiny)) - self._cache._norma
         
     def gradient_dual(self, lda):
-        z, _ = self._z(lda)
-        return self._moment - self._gradient_z(lda) / z
+        self._compute_z_and_grad(lda)
+        return self._moment - self._cache._grad_z / self._cache._z
         
     def hessian_dual(self, lda):
-        z, _ = self._z(lda)
-        g = self._gradient_z(lda)[:, None]
-        return -self._hessian_z(lda) / z + np.dot(g, g.T) / (z  ** 2)
-
-    def fit(self, method='newton', positive_weights=False, weight=None, **kwargs):
+        self._compute_z_and_grad(lda)
+        g1 = self._cache._grad_z[:, None] / self._cache._z
+        H1 = np.dot(g1, g1.T)
+        H2 = np.dot(self._cache._udist_basis.T, self._basis) / self._cache._z
+        return H1 - H2
+        
+    def fit(self, method='lbfgs', positive_weights=False, weight=None, **kwargs):
         if not weight is None:
             self.set_weight(weight)
         f = lambda lda: -self.dual(lda)
@@ -82,6 +117,10 @@ class Maxent(object):
         if positive_weights:
             proj = lambda lda: (lda >= 0) * lda
             self._lda = proj(self._lda)
+            # TODO: implement constrained optimization with scipy methods
+            if method in ('cg', 'ncg', 'bfgs', 'lbfgs'):
+                method = 'newton'
+                print('Warning: changing optimization method from %s to newton...' % method)
         else:
             proj = None
         m = minimizer(method, self._lda, f, grad_f, hess_f, proj=proj, **kwargs)
@@ -89,7 +128,8 @@ class Maxent(object):
         self._optimizer = m
 
     def dist(self):
-        udist, _ = self._udist(self._lda)
+        self._compute_z(self._lda)
+        udist = self._cache._udist
         return udist / np.sum(udist)
 
     def score(self):
@@ -134,7 +174,7 @@ def safe_exp_dist(fxy, lda, prior):
     return prior * np.exp(aux - norma[:, None]), norma
 
 
-def normalize_dist(p, tiny=1e-25):
+def normalize_dist(p, tiny):
     out = np.full(p.shape, 1 / p.shape[1])
     aux = np.sum(p, 1)
     nonzero = aux > tiny
@@ -144,7 +184,7 @@ def normalize_dist(p, tiny=1e-25):
 
 class ConditionalMaxent(Maxent):
 
-    def __init__(self, basis_generator, moment, data, prior=None, data_weight=None):
+    def __init__(self, basis_generator, moment, data, prior=None, data_weight=None, tiny=1e-100):
         """
         basis_generator is a function that takes an array of data with
         shape (examples, features) and returns an array with shape
@@ -156,7 +196,7 @@ class ConditionalMaxent(Maxent):
         """
         self._init_data(data, data_weight)
         self._init_basis(basis_generator)
-        self._init_optimizer()
+        self._init_optimizer(tiny)
         self._init_prior(prior)
         self._init_moment(moment)
 
@@ -175,54 +215,45 @@ class ConditionalMaxent(Maxent):
     def _init_basis(self, basis_generator):
         self._basis_generator = basis_generator
         self._basis = basis_generator(self._data)
-        
-    def _init_optimizer(self):
-        self.set_weight(0) 
-        self._udist = CachedFunction(self.__udist)
-        self._udist_basis = CachedFunction(self.__udist_basis)
-        self._z = CachedFunction(self.__z)
-        self._gradient_z = CachedFunction(self.__gradient_z)
 
-    def __udist(self, lda):
-        return safe_exp_dist(self._basis, lda, self._prior)
+    def _compute_z(self, lda):
+        if self._cache.same(lda):
+            return
+        udist, norma = safe_exp_dist(self._basis, lda, self._prior)
+        z = np.sum(udist, 1)
+        self._cache.update_z(lda, norma, udist, z)
 
-    def __udist_basis(self, lda):
-        return self._udist(lda)[0][..., None] * self._basis
+    def _compute_z_and_grad(self, lda):
+        self._compute_z(lda)
+        if not self._cache._grad_z is None:
+            return
+        udist_basis = self._cache._udist[..., None] * self._basis
+        grad_z = np.sum(udist_basis, 1)
+        self._cache.update_grad_z(lda, udist_basis, grad_z)
 
-    def __z(self, lda):
-        udist, norma = self._udist(lda)
-        return np.sum(udist, 1), norma
-
-    def __gradient_z(self, lda):
-        return np.sum(self._udist_basis(lda), 1)
-
-    def _hessian_z(self, lda):
-        return sdot(np.swapaxes(self._udist_basis(lda), 1, 2), self._basis)   
-    
     def dual(self, lda):
-        z, norma = self._z(lda)
-        return np.dot(lda, self._moment) - self._sample_mean(np.log(force_tiny(z)) + norma)
-        
+        self._compute_z(lda)
+        return np.dot(lda, self._moment) - self._sample_mean(np.log(np.maximum(self._cache._z, self._tiny)) + self._cache._norma)
+
     def gradient_dual(self, lda):
-        z, _ = self._z(lda)
-        g = self._gradient_z(lda)
-        return self._moment - self._sample_mean(g / z[:, None])
-
+        self._compute_z_and_grad(lda)
+        return self._moment - self._sample_mean(self._cache._grad_z / self._cache._z[:, None])
+        
     def hessian_dual(self, lda):
-        z, _ = self._z(lda)
-        gn = self._gradient_z(lda) / z[:, None]
-        H1 = sdot(gn[:, :, None], gn[:, None, :])       
-        H2 = self._hessian_z(lda) / z[:, None, None]
-        return self._sample_mean(-H2 + H1)
-
+        self._compute_z_and_grad(lda)      
+        g1 = self._cache._grad_z / self._cache._z[:, None]
+        H1 = sdot(g1[:, :, None], g1[:, None, :])
+        H2 = sdot(np.swapaxes(self._cache._udist_basis, 1, 2), self._basis) / self._cache._z[:, None, None]
+        return self._sample_mean(H1 - H2)
+    
     def dist(self, data=None, weight=None):
         if weight is None:
             weight = self._lda
+        self._compute_z(weight)
         if data is None:
-            return normalize_dist(self._udist(weight)[0])
-        fxy = self._basis_generator(reshape_data(data))
-        p, _ = safe_exp_dist(fxy, weight, self._prior)
-        return normalize_dist(p)
+            return normalize_dist(self._cache._udist, self._tiny)
+        p, _ = safe_exp_dist(self._basis_generator(reshape_data(data)), weight, self._prior)
+        return normalize_dist(p, self._tiny)
     
     @property
     def data(self):
@@ -243,7 +274,7 @@ class ConditionalMaxent(Maxent):
 
 class MaxentClassifier(ConditionalMaxent):
 
-    def __init__(self, data, target, basis_generator, prior=None):
+    def __init__(self, data, target, basis_generator, prior=None, tiny=1e-100):
         """
         data (n, n_features)
         target (n, )
@@ -251,7 +282,7 @@ class MaxentClassifier(ConditionalMaxent):
         """
         self._init_dataset(data, target, prior)
         self._init_basis(basis_generator)
-        self._init_optimizer()
+        self._init_optimizer(tiny)
         self._init_moment()
 
     def _init_dataset(self, data, target, prior):
@@ -294,18 +325,18 @@ def mean_log_lik1d(s):
 
 class GaussianCompositeInference(MaxentClassifier):
 
-    def __init__(self, data, target, prior=None, supercomposite=False, homoscedastic=False, tiny=1e-3):
+    def __init__(self, data, target, prior=None, supercomposite=False, homoscedastic=False, tiny=1e-100, min_rel_dev=1e-3):
         """
         data (n, n_features)
         target (n, )
         """
         self._homoscedastic = bool(homoscedastic)
         self._supercomposite = bool(supercomposite)
-        self._tiny = float(tiny)
+        self._min_rel_dev = float(min_rel_dev)
         self._init_dataset(data, target, prior)        
         self._init_training()
         self._init_basis(self._make_basis_generator())
-        self._init_optimizer()
+        self._init_optimizer(tiny)
         self._init_moment()
         
     def _init_training(self):
@@ -318,7 +349,7 @@ class GaussianCompositeInference(MaxentClassifier):
         else:
             devs = np.array([np.sqrt(np.mean(res2[self._target == x], 0)) for x in range(targets)])
         self._means = means
-        self._devs = np.maximum(devs, self._tiny * np.max(devs))
+        self._devs = np.maximum(devs, self._min_rel_dev * np.max(devs))
 
     def _make_basis_generator(self):
         targets = len(self._prior)
@@ -356,10 +387,10 @@ class GaussianCompositeInference(MaxentClassifier):
 
 class LogisticRegression(MaxentClassifier):
 
-    def __init__(self, data, target, prior=None):
+    def __init__(self, data, target, prior=None, tiny=1e-100):
         self._init_dataset(data, target, prior)
         self._init_basis(self._make_basis_generator())
-        self._init_optimizer()
+        self._init_optimizer(tiny)
         self._init_moment()
 
     def _make_basis_generator(self):
@@ -418,13 +449,11 @@ class MaxentGKL(object):
         self._fx = np.array([[1] + [basis(x, i) for i in range(len(moment))] for x in range(len(self._prior))])
         self._moment = np.concatenate(([1.], moment))
         self._lda = np.zeros(self._fx.shape[-1])
-        self._dist = CachedFunction(self.__dist)
-        self._dist_fx = CachedFunction(self.__dist_fx)
 
-    def __dist(self, lda):
+    def _dist(self, lda):
         return self._prior * np.exp(np.dot(self._fx, lda))
        
-    def __dist_fx(self, lda):
+    def _dist_fx(self, lda):
         return self._dist(lda)[:, None] * self._fx
 
     def dist(self):
@@ -439,7 +468,7 @@ class MaxentGKL(object):
     def hessian_dual(self, lda):
         return -np.dot(self._dist_fx(lda).T, self._fx)
 
-    def fit(self, method='newton', weight=None, **kwargs):
+    def fit(self, method='lbfgs', weight=None, **kwargs):
 
         def cost(lda):
             return -self.dual(lda)

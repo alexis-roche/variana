@@ -19,3 +19,5 @@ mc = ConditionalMaxent(basis_fn, (.3, .5), data)
 mc.fit()
 pc = mc.dist(0)
 print(mc.weight)
+
+
