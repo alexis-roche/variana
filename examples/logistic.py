@@ -9,8 +9,8 @@ import pylab as pl
 
 
 TEST_SIZE = 0.2
-TOL = 1e-20
-POSITIVE_WEIGHTS = True
+TOL = 1e-5
+POSITIVE_WEIGHTS = False
 HOMOSCEDASTIC = False
 SUPERCOMPOSITE = False
 
@@ -111,7 +111,7 @@ if len(sys.argv) > 1:
 data, target, t_data, t_target = load(dataset, test_size=TEST_SIZE)
 
 
-lr = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='multinomial', tol=TOL, max_iter=1000)
+lr = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='multinomial', tol=TOL, max_iter=10000)
 lr.fit(data, target)
 elr = Evaluator('sklearn', lr, data, target, t_data, t_target)
 elr.disp()
@@ -121,9 +121,7 @@ lr2.fit(method='lbfgs', tol=TOL)
 elr2 = Evaluator('variana', lr2, data, target, t_data, t_target)
 elr2.disp(compare=(elr,), grad_test=True)
 
-lr3 = GaussianCompositeInference(data, target,
-                                 homoscedastic=HOMOSCEDASTIC,
-                                 supercomposite=SUPERCOMPOSITE)
+lr3 = GaussianCompositeInference(data, target, homoscedastic=HOMOSCEDASTIC, supercomposite=SUPERCOMPOSITE)
 
 lr3.set_weight(1)
 jc = Evaluator('naive', lr3, data, target, t_data, t_target)

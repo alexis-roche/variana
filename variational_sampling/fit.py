@@ -63,7 +63,7 @@ class VariationalFit(object):
           Maximum number of iterations in optimization
 
         minimizer : string
-          One of 'newton', 'quasi_newton', steepest', 'conjugate'
+          One of 'newton', 'steepest', 'conjugate'
         """
         t0 = time()
         self.sample = sample
@@ -144,16 +144,15 @@ class VariationalFit(object):
         """
         theta = self._theta_init
         meth = self.minimizer
-        if meth == 'quasi_newton':
+        if meth == 'steepest':
             hessian = self._pseudo_hessian()
         else:
             hessian = self._hessian
         m = minimizer(meth, theta, self._loss, self._gradient,
                       hessian,
-                      maxiter=self.maxiter, tol=self.tol,
-                      disp=VERBOSE)
+                      maxiter=self.maxiter, tol=self.tol)
         if VERBOSE:
-            print(m)
+            print(m.info())
         self._theta = m.argmin()
         self.minimizer = m
 
