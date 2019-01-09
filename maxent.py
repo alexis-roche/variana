@@ -76,7 +76,7 @@ class Maxent(object):
         if self._moment.ndim == 0:
             self._moment = self._moment[None]
 
-    def _compute_z(self, lda):
+    def _update_z(self, lda):
         if self._cache.same(lda):
             return
         aux = np.dot(self._basis, lda)
@@ -85,8 +85,8 @@ class Maxent(object):
         z = np.sum(udist)
         self._cache.update_z(lda, norma, udist, z)
 
-    def _compute_z_and_grad(self, lda):
-        self._compute_z(lda)
+    def _update_z_and_grad(self, lda):
+        self._update_z(lda)
         if not self._cache._grad_z is None:
             return
         udist_basis = self._cache._udist[:, None] * self._basis
@@ -94,41 +94,35 @@ class Maxent(object):
         self._cache.update_grad_z(lda, udist_basis, grad_z)
 
     def dual(self, lda):
-        self._compute_z(lda)
+        self._update_z(lda)
         return np.dot(lda, self._moment) - np.log(np.maximum(self._cache._z, self._tiny)) - self._cache._norma
         
     def gradient_dual(self, lda):
-        self._compute_z_and_grad(lda)
+        self._update_z_and_grad(lda)
         return self._moment - self._cache._grad_z / self._cache._z
         
     def hessian_dual(self, lda):
-        self._compute_z_and_grad(lda)
+        self._update_z_and_grad(lda)
         g1 = self._cache._grad_z[:, None] / self._cache._z
         H1 = np.dot(g1, g1.T)
         H2 = np.dot(self._cache._udist_basis.T, self._basis) / self._cache._z
         return H1 - H2
         
-    def fit(self, method='lbfgs', positive_weights=False, weight=None, **kwargs):
+    def fit(self, method='lbfgs', positive_weights=False, weight=None, tol=1e-5):
         if not weight is None:
             self.set_weight(weight)
         f = lambda lda: -self.dual(lda)
         grad_f = lambda lda: -self.gradient_dual(lda)
         hess_f = lambda lda: -self.hessian_dual(lda)
+        bounds = None
         if positive_weights:
-            proj = lambda lda: (lda >= 0) * lda
-            self._lda = proj(self._lda)
-            # TODO: implement constrained optimization with scipy methods
-            if method in ('cg', 'ncg', 'bfgs', 'lbfgs'):
-                method = 'newton'
-                print('Warning: changing optimization method from %s to newton...' % method)
-        else:
-            proj = None
-        m = minimizer(method, self._lda, f, grad_f, hess_f, proj=proj, **kwargs)
+            bounds = [(0, None) for i in range(len(self._lda))]
+        m = minimizer(method, self._lda, f, grad_f, hess_f, tol=tol, bounds=bounds)
         self._lda = m.argmin()
         self._optimizer = m
 
     def dist(self):
-        self._compute_z(self._lda)
+        self._update_z(self._lda)
         udist = self._cache._udist
         return udist / np.sum(udist)
 
@@ -216,15 +210,15 @@ class ConditionalMaxent(Maxent):
         self._basis_generator = basis_generator
         self._basis = basis_generator(self._data)
 
-    def _compute_z(self, lda):
+    def _update_z(self, lda):
         if self._cache.same(lda):
             return
         udist, norma = safe_exp_dist(self._basis, lda, self._prior)
         z = np.sum(udist, 1)
         self._cache.update_z(lda, norma, udist, z)
 
-    def _compute_z_and_grad(self, lda):
-        self._compute_z(lda)
+    def _update_z_and_grad(self, lda):
+        self._update_z(lda)
         if not self._cache._grad_z is None:
             return
         udist_basis = self._cache._udist[..., None] * self._basis
@@ -232,15 +226,15 @@ class ConditionalMaxent(Maxent):
         self._cache.update_grad_z(lda, udist_basis, grad_z)
 
     def dual(self, lda):
-        self._compute_z(lda)
+        self._update_z(lda)
         return np.dot(lda, self._moment) - self._sample_mean(np.log(np.maximum(self._cache._z, self._tiny)) + self._cache._norma)
 
     def gradient_dual(self, lda):
-        self._compute_z_and_grad(lda)
+        self._update_z_and_grad(lda)
         return self._moment - self._sample_mean(self._cache._grad_z / self._cache._z[:, None])
         
     def hessian_dual(self, lda):
-        self._compute_z_and_grad(lda)      
+        self._update_z_and_grad(lda)      
         g1 = self._cache._grad_z / self._cache._z[:, None]
         H1 = sdot(g1[:, :, None], g1[:, None, :])
         H2 = sdot(np.swapaxes(self._cache._udist_basis, 1, 2), self._basis) / self._cache._z[:, None, None]
@@ -249,7 +243,7 @@ class ConditionalMaxent(Maxent):
     def dist(self, data=None, weight=None):
         if weight is None:
             weight = self._lda
-        self._compute_z(weight)
+        self._update_z(weight)
         if data is None:
             return normalize_dist(self._cache._udist, self._tiny)
         p, _ = safe_exp_dist(self._basis_generator(reshape_data(data)), weight, self._prior)
@@ -468,7 +462,7 @@ class MaxentGKL(object):
     def hessian_dual(self, lda):
         return -np.dot(self._dist_fx(lda).T, self._fx)
 
-    def fit(self, method='lbfgs', weight=None, **kwargs):
+    def fit(self, method='lbfgs', weight=None):
 
         def cost(lda):
             return -self.dual(lda)
@@ -481,7 +475,7 @@ class MaxentGKL(object):
                     
         if not weight is None:
             self._lda = np.asarray(lda)
-        m = minimizer(method, self._lda, cost, gradient_cost, hessian_cost, **kwargs)
+        m = minimizer(method, self._lda, cost, gradient_cost, hessian_cost)
         self._lda = m.argmin()
         
     @property

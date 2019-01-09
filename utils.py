@@ -63,7 +63,7 @@ class SteepestDescent(object):
                  stepsize=1, adaptive=True,
                  damping=0,
                  proj=None,
-                 verbose=False):
+                 disp=False):
 
         self._genit('steepest',
                     x, f, grad_f, None,
@@ -73,7 +73,7 @@ class SteepestDescent(object):
                     adaptive=adaptive,
                     damping=damping,
                     proj=proj,
-                    verbose=verbose)
+                    disp=disp)
         self.run()
 
     def _genit(self, name,
@@ -84,8 +84,8 @@ class SteepestDescent(object):
                adaptive=False,
                damping=0,
                proj=None,
-               verbose=False):
-        self._name = name
+               disp=False):
+        self._name = str(name)
         self._x = np.asarray(x).ravel()
         self._args = args
         self._evals = np.array((0, 0, 0))
@@ -110,7 +110,8 @@ class SteepestDescent(object):
             self._proj = lambda x: x
         else:
             self._proj = proj
-        self._verbose = verbose
+            self._x = proj(self._x)
+        self._disp = disp
         self._fval = self._f(self._x, *self._args)
         self._evals[0] += 1
         self._init_fval = self._fval
@@ -122,7 +123,7 @@ class SteepestDescent(object):
 
     def run(self):
         self._time = self._run()
-        if self._verbose:
+        if self._disp:
             print(self)
     
     @probe_time
@@ -186,7 +187,7 @@ class ConjugateDescent(SteepestDescent):
                  stepsize=1, adaptive=True,
                  damping=0,
                  proj=None,
-                 verbose=False):
+                 disp=False):
         self._genit('conjugate',
                     x, f, grad_f, None,
                     args,
@@ -195,7 +196,7 @@ class ConjugateDescent(SteepestDescent):
                     adaptive=adaptive,
                     damping=damping,
                     proj=proj,
-                    verbose=verbose)
+                    disp=disp)
         self._prev_dx = None
         self._prev_g = None
         self.run()
@@ -227,7 +228,7 @@ class NewtonDescent(SteepestDescent):
                  stepsize=1, adaptive=True,
                  damping=0,
                  proj=None,
-                 verbose=False):
+                 disp=False):
         self._genit('newton',
                     x, f, grad_f, hess_f,
                     args,
@@ -236,7 +237,7 @@ class NewtonDescent(SteepestDescent):
                     adaptive=adaptive,
                     damping=damping,
                     proj=proj,
-                    verbose=verbose)
+                    disp=disp)
         self.run()
         
     def direction(self):
@@ -277,7 +278,7 @@ class QuasiNewtonDescent(SteepestDescent):
                  stepsize=1, adaptive=True,
                  damping=0,
                  proj=None,
-                 verbose=False):
+                 disp=False):
         """
         Assume fix hessian
         """
@@ -289,7 +290,7 @@ class QuasiNewtonDescent(SteepestDescent):
                     adaptive=adaptive,
                     damping=damping,
                     proj=proj,
-                    verbose=verbose)
+                    disp=disp)
         self._hess_inv = inv_sym_matrix(hess_f)
         self.run()
         
@@ -300,78 +301,110 @@ class QuasiNewtonDescent(SteepestDescent):
         return np.nan_to_num(dx)
 
 
-class ScipyCG(SteepestDescent):
+class ScipyCG(object):
 
     def __init__(self, x, f, grad_f, hess_f=None, args=(),
-                 maxiter=None, tol=1e-7, verbose=False):
-        self._genit('cg', x, f, grad_f, None, args, maxiter, tol, verbose=verbose)
-        self.run()
-
+                 maxiter=None, tol=1e-7, bounds=None, disp=False):
+        self._x = np.asarray(x)
+        self._f = f
+        self._grad_f = grad_f
+        self._hess_f = hess_f
+        self._args = args
+        if maxiter is None:
+            self._maxiter = None
+        else:
+            self._maxiter = int(maxiter)
+        self._tol = float(tol)
+        self._bounds = bounds
+        self._disp = bool(disp)
+        self._time = self._run()
+        
     @probe_time
     def _run(self):
         self._x, self._fval = fmin_cg(self._f, self._x, fprime=self._grad_f,
                                       args=self._args,
                                       gtol=self._tol, maxiter=self._maxiter, 
-                                      full_output=True, disp=self._verbose)[0:2]
+                                      full_output=True, disp=self._disp)[0:2]
 
     def __str__(self):
         return '\t Initial function value: %f\n' % self._init_fval\
             + '\t Optimization time: %f sec\n' % self._time
-    
+
+    def argmin(self):
+        return self._x
+
         
 class ScipyNCG(ScipyCG):
         
-    def __init__(self, x, f, grad_f, hess_f=None, args=(),
-                 maxiter=None, tol=1e-7, verbose=False):
-        self._genit('ncg', x, f, grad_f, hess_f, args, maxiter, tol, verbose=verbose)
-        self._time = self.run()
-
     @probe_time
     def _run(self):
         self._x, self._fval = fmin_ncg(self._f, self._x, fprime=self._grad_f,
                                        args=self._args,
                                        fhess=self._hess_f,
                                        avextol=self._tol, maxiter=self._maxiter, 
-                                       full_output=True, disp=self._verbose)[0:2]
+                                       full_output=True, disp=self._disp)[0:2]
 
         
 class ScipyBFGS(ScipyCG):
         
-    def __init__(self, x, f, grad_f, hess_f=None, args=(),
-                 maxiter=None, tol=1e-7, verbose=False):
-        self._genit('bfgs', x, f, grad_f, None, args, maxiter, tol, verbose=verbose)
-        self._time = self.run()
-
     @probe_time
     def _run(self):
         self._x, self._fval = fmin_bfgs(self._f, self._x, fprime=self._grad_f,
                                         args=self._args,
                                         gtol=self._tol, maxiter=self._maxiter, 
-                                        full_output=True, disp=self._verbose)[0:2]
+                                        full_output=True, disp=self._disp)[0:2]
 
 class ScipyLBFGS(ScipyCG):
         
-    def __init__(self, x, f, grad_f, hess_f=None, args=(),
-                 maxiter=None, tol=1e-7, verbose=False):
-        if maxiter is None:
-            maxiter = 15000
-        self._genit('lbfgs', x, f, grad_f, None, args, maxiter, tol, verbose=verbose)
-        self._time = self.run()
-
     @probe_time
     def _run(self):
+        if self._maxiter is None:
+            self._maxiter = 100000
         self._x, self._fval = fmin_l_bfgs_b(self._f, self._x, fprime=self._grad_f,
                                             args=self._args,
                                             pgtol=self._tol, maxiter=self._maxiter,
-                                            disp=self._verbose)[0:2]
+                                            bounds=self._bounds,
+                                            disp=self._disp)[0:2]
 
+
+def squash(x):
+    aux = np.unique(x)
+    if len(aux) == 1:
+        return float(aux)
+    return x
+
+
+def bounds_to_proj(bounds):
+    
+    replace_none = lambda x, a: a if x is None else x   
+    b0 = squash(np.array([replace_none(b[0], -np.inf) for b in bounds]))
+    b1 = squash(np.array([replace_none(b[1], np.inf) for b in bounds]))
+
+    if isinstance(b0, float):
+        if b0 == -np.inf:
+            if isinstance(b1, float):
+                if b1 == np.inf:
+                    proj = lambda x: x
+        else:
+            proj = lambda x: (x <= b1) * x
+    else:
+        if isinstance(b1, float):
+            if b1 == np.inf:
+                print('cooool')
+                proj = lambda x: (x >= b0) * x
+        else:
+            proj = lambda x: (x >= b0) * (x <= b1) * x
+
+    return proj
+            
 
 def minimizer(name, x, f, grad_f, hess_f=None,
               args=(),
               maxiter=None, tol=1e-7,
-              stepsize=1, adaptive=True, proj=None,
+              stepsize=1, adaptive=True,
+              bounds=None,
               damping=0,
-              verbose=False):
+              disp=False):
     """
     name must be one of 'steepest', 'conjugate', 'newton', 'quasi_newton', 'cg', 'ncg', 'bfgs', 'lbfgs'
     """
@@ -386,10 +419,31 @@ def minimizer(name, x, f, grad_f, hess_f=None,
 
     if name not in min_obj.keys():
         raise ValueError('unknown minimizer')
-    kwargs = {'args': args, 'maxiter': maxiter, 'tol': tol, 'verbose': verbose}
-    if name not in ('cg', 'ncg', 'bfgs', 'lbfgs'):
-        kwargs.update({'stepsize': stepsize, 'adaptive': adaptive, 'damping': damping, 'proj': proj})
-    return min_obj[name](x, f, grad_f, hess_f=hess_f, **kwargs)
+    local_meth = name in ('steepest', 'conjugate', 'newton', 'quasi_newton')
+
+    if local_meth:
+        proj = None
+        if not bounds is None:
+            if callable(bounds):
+                proj = bounds
+            else:
+                proj = bounds_to_proj(bounds)
+                
+        return min_obj[name](x, f, grad_f, hess_f=hess_f,
+                             maxiter=maxiter, tol=tol,
+                             stepsize=stepsize, adaptive=adaptive,
+                             proj=proj, damping=damping,
+                             disp=disp)
+
+    if not bounds is None:
+        if name != 'lbfgs':
+            print('Warning: changing optimization method from %s to lbfgs...' % name)
+        name = 'lbfgs'
+
+    return min_obj[name](x, f, grad_f, hess_f=hess_f,
+                         maxiter=maxiter, tol=tol,
+                         bounds=bounds, disp=disp)
+
 
 
 def approx_gradient(f, x, epsilon, args=()):

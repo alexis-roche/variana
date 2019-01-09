@@ -10,7 +10,7 @@ import pylab as pl
 
 TEST_SIZE = 0.2
 TOL = 1e-20
-POSITIVE_WEIGHTS = False
+POSITIVE_WEIGHTS = True
 HOMOSCEDASTIC = False
 SUPERCOMPOSITE = False
 
@@ -111,7 +111,7 @@ if len(sys.argv) > 1:
 data, target, t_data, t_target = load(dataset, test_size=TEST_SIZE)
 
 
-lr = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='multinomial', max_iter=1000)
+lr = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='multinomial', tol=TOL, max_iter=1000)
 lr.fit(data, target)
 elr = Evaluator('sklearn', lr, data, target, t_data, t_target)
 elr.disp()
