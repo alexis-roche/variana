@@ -308,11 +308,11 @@ class ScipyLBFGS(ScipyCG):
     def _run(self):
         if self._maxiter is None:
             self._maxiter = 100000
-            aux = fmin_l_bfgs_b(self._f, self._x, fprime=self._grad_f,
-                                args=self._args,
-                                pgtol=self._tol, maxiter=self._maxiter,
-                                bounds=self._bounds,
-                                disp=self._disp)
+        aux = fmin_l_bfgs_b(self._f, self._x, fprime=self._grad_f,
+                            args=self._args,
+                            pgtol=self._tol, maxiter=self._maxiter,
+                            bounds=self._bounds,
+                            disp=self._disp)
         self._x, self._fval, self._run_info = aux
         self._name = 'fmin_l_bfgs_b'
 

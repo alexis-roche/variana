@@ -108,7 +108,7 @@ class Maxent(object):
         H2 = np.dot(self._cache._udist_basis.T, self._basis) / self._cache._z
         return H1 - H2
         
-    def fit(self, method='lbfgs', positive_weights=False, weight=None, tol=1e-5):
+    def fit(self, method='lbfgs', positive_weights=False, weight=None, tol=1e-5, maxiter=10000):
         if not weight is None:
             self.set_weight(weight)
         f = lambda lda: -self.dual(lda)
@@ -117,10 +117,10 @@ class Maxent(object):
         bounds = None
         if positive_weights:
             bounds = [(0, None) for i in range(len(self._lda))]
-        m = minimizer(method, self._lda, f, grad_f, hess_f, tol=tol, bounds=bounds)
+        m = minimizer(method, self._lda, f, grad_f, hess_f, bounds=bounds, tol=tol, maxiter=maxiter)
         self._lda = m.argmin()
-        self._optimizer = m
-
+        return m.info()
+        
     def dist(self):
         self._update_z(self._lda)
         udist = self._cache._udist
@@ -145,7 +145,6 @@ class Maxent(object):
     @property
     def prior(self):
         return self._prior
-
 
 
 def reshape_data(data):
@@ -226,6 +225,8 @@ class ConditionalMaxent(Maxent):
         self._cache.update_grad_z(lda, udist_basis, grad_z)
 
     def dual(self, lda):
+        ### DEBUG
+        print('new call')
         self._update_z(lda)
         return np.dot(lda, self._moment) - self._sample_mean(np.log(np.maximum(self._cache._z, self._tiny)) + self._cache._norma)
 
@@ -319,13 +320,15 @@ def mean_log_lik1d(s):
 
 class GaussianCompositeInference(MaxentClassifier):
 
-    def __init__(self, data, target, prior=None, supercomposite=False, homoscedastic=False, tiny=1e-100, min_rel_dev=1e-3):
+    def __init__(self, data, target, prior=None, homoscedastic=False, ref_class=None, tiny=1e-100, min_rel_dev=1e-3):
         """
         data (n, n_features)
         target (n, )
         """
         self._homoscedastic = bool(homoscedastic)
-        self._supercomposite = bool(supercomposite)
+        self._ref_class = None
+        if not ref_class is None:
+            self._ref_class = int(ref_class)
         self._min_rel_dev = float(min_rel_dev)
         self._init_dataset(data, target, prior)        
         self._init_training()
@@ -356,23 +359,32 @@ class GaussianCompositeInference(MaxentClassifier):
         def basis_generator_super(data):
             examples, features = data.shape
             out = np.zeros((examples, targets, targets * features))
+            ll_ref = log_lik1d(data, self._means[self._ref_class], self._devs[self._ref_class])
             for x in range(targets):
                 n_x = features * x
-                out[:, x, n_x:(n_x + features)] = log_lik1d(data, self._means[x], self._devs[x])
+                out[:, x, n_x:(n_x + features)] = log_lik1d(data, self._means[x], self._devs[x]) - ll_ref
             return out
-        if self._supercomposite:
+        if self._ref_class is None:
+            return basis_generator
+        else:
             return basis_generator_super
-        return basis_generator
     
     def _check_moment(self):
         # Faster than empirical mean log-likelihood values but does
         # not work if super composite and homoscedastic
         moment = self._prior[:, None] * np.array([mean_log_lik1d(self._devs[x]) for x in range(len(self._prior))])
-        if self._supercomposite:
-            moment = moment.ravel()
-        else:
+        if self._ref_class is None:
             moment = moment.sum(0)
+        else:
+            moment = moment.ravel()
         return moment
+
+    @property
+    def class_weight(self):
+        if self._ref_class is None:
+            return self._lda
+        else:
+            return self._lda.reshape((len(self._prior), self._data.shape[1]))
 
 
 #########################################################################
@@ -393,13 +405,16 @@ class LogisticRegression(MaxentClassifier):
             examples, features = data.shape
             n = features + 1
             out = np.zeros((examples, targets, n * targets))
-            for x in range(targets):
+            for x in range(1, targets):
                 nx = n * x
                 out[:, x, nx] = 1
                 out[:, x, (nx + 1):(nx + n)] = data
             return out
         return basis_generator
 
+    @property
+    def class_weight(self):
+        return self._lda.reshape((len(self._prior), 1 + self._data.shape[1]))
 
 
 ##################################

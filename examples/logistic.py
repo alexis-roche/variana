@@ -9,10 +9,10 @@ import pylab as pl
 
 
 TEST_SIZE = 0.2
-TOL = 1e-5
-POSITIVE_WEIGHTS = False
-HOMOSCEDASTIC = False
-SUPERCOMPOSITE = False
+TOL = 1e-20
+POSITIVE_WEIGHTS = True
+HOMOSCEDASTIC = False #True
+REF_CLASS = 0
 
 
 def one_hot_encoding(target):
@@ -34,7 +34,7 @@ def load(dataset, test_size=0.25, random_state=None):
     train = p[0:n_train]
     test = p[n_train:]
     return data[train], target[train], data[test], target[test]
-    
+
 
 def accuracy(target, dist):
     return np.sum(target == np.argmax(dist, 1)) / len(target)
@@ -111,35 +111,47 @@ if len(sys.argv) > 1:
 data, target, t_data, t_target = load(dataset, test_size=TEST_SIZE)
 
 
+lr0 = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='ovr', tol=TOL, max_iter=10000)
+lr0.fit(data, target)
+elr0 = Evaluator('sklearn', lr0, data, target, t_data, t_target)
+elr0.disp()
+
 lr = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='multinomial', tol=TOL, max_iter=10000)
 lr.fit(data, target)
 elr = Evaluator('sklearn', lr, data, target, t_data, t_target)
 elr.disp()
 
 lr2 = LogisticRegression2(data, target)
-lr2.fit(method='lbfgs', tol=TOL)
+info2 = lr2.fit(method='lbfgs', tol=TOL)
 elr2 = Evaluator('variana', lr2, data, target, t_data, t_target)
 elr2.disp(compare=(elr,), grad_test=True)
+print('Learning time: %f sec' % info2['time'])
 
-lr3 = GaussianCompositeInference(data, target, homoscedastic=HOMOSCEDASTIC, supercomposite=SUPERCOMPOSITE)
-
+lr3 = GaussianCompositeInference(data, target, homoscedastic=HOMOSCEDASTIC, ref_class=REF_CLASS)
 lr3.set_weight(1)
 jc = Evaluator('naive', lr3, data, target, t_data, t_target)
 jc.disp()
 lr3.set_weight(1 / len(lr3.weight))
 jc2 = Evaluator('e-bayes', lr3, data, target, t_data, t_target)
 jc2.disp()
+lr3.set_weight(0)
 
-lr3.fit(method=method, tol=TOL, positive_weights=POSITIVE_WEIGHTS)
+info3 = lr3.fit(method=method, tol=TOL, positive_weights=POSITIVE_WEIGHTS)
 elr3 = Evaluator('composite', lr3, data, target, t_data, t_target)
 elr3.disp(compare=(elr, elr2), grad_test=True)
+print('Learning time: %f sec' % info3['time'])
+print('Weight sum = %f' % np.sum(lr3.weight))
+print('Weight ratio = %f' % (np.sum(lr3.weight) / data.shape[1]))
+print('Weight sparsity = %f' % (np.sum(lr3.weight==0) / data.shape[1]))
 
 print()
-print('Number of classes: %d' % (1 + target.max()))
+classes = 1 + target.max()
+print('Number of classes: %d' % classes)
 print('Number of features: %d' % data.shape[1])
 print('Number of examples: %d' % data.shape[0])
 print('Logistic regression parameters: %d' % len(lr2.weight))
 print('Composite inference parameters: %d' % len(lr3.weight))
+print('Chance cross-entropy: %f' % np.log(classes))
 
 def zob(idx):
     pl.figure()
@@ -153,4 +165,8 @@ def zob(idx):
     except:
         print('elr3 does not exist')
     pl.show()
+
+import pylab as pl
+pl.plot(lr3.weight)
+pl.show()
 
