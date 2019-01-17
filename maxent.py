@@ -225,8 +225,6 @@ class ConditionalMaxent(Maxent):
         self._cache.update_grad_z(lda, udist_basis, grad_z)
 
     def dual(self, lda):
-        ### DEBUG
-        print('new call')
         self._update_z(lda)
         return np.dot(lda, self._moment) - self._sample_mean(np.log(np.maximum(self._cache._z, self._tiny)) + self._cache._norma)
 
@@ -300,7 +298,7 @@ class MaxentClassifier(ConditionalMaxent):
 
     def _init_moment(self):
         # Use empirical moments
-        self._moment = np.sum(self._w[:, None] * self._basis[range(self._basis.shape[0]), self._target], 0)
+        self._moment = self._sample_mean(self._basis[range(self._basis.shape[0]), self._target])
 
 
 #########################################################################
@@ -310,59 +308,60 @@ class MaxentClassifier(ConditionalMaxent):
 GAUSS_CONSTANT = .5 * np.log(2 * np.pi)
 
 
-def log_lik1d(z, m, s):
-    return -(GAUSS_CONSTANT + np.log(s) + .5 * ((z - m) / s) ** 2)
+def log_lik1d(z, m, s, tiny=1e-100, big=1000):
+    s = np.maximum(s, tiny)
+    return np.clip(-(GAUSS_CONSTANT + np.log(s) + .5 * ((z - m) / s) ** 2), -big, big)
 
 
-def mean_log_lik1d(s):
+def mean_log_lik1d(s, tiny):
+    s = np.maximum(s, tiny)
     return -(GAUSS_CONSTANT + np.log(s) + .5)
 
 
 class GaussianCompositeInference(MaxentClassifier):
 
-    def __init__(self, data, target, prior=None, homoscedastic=False, ref_class=None, tiny=1e-100, min_rel_dev=1e-3):
+    def __init__(self, data, target, prior=None, homo_sced=0, ref_class=None, tiny=1e-100, max_log=1000):
         """
         data (n, n_features)
         target (n, )
         """
-        self._homoscedastic = bool(homoscedastic)
+        self._homo_sced = max(0, min(1, float(homo_sced)))
         self._ref_class = None
         if not ref_class is None:
             self._ref_class = int(ref_class)
-        self._min_rel_dev = float(min_rel_dev)
+        self._max_log = float(max_log)
         self._init_dataset(data, target, prior)        
         self._init_training()
-        self._init_basis(self._make_basis_generator())
+        self._init_basis(self._make_basis_generator(float(tiny), float(max_log)))
         self._init_optimizer(tiny)
         self._init_moment()
         
     def _init_training(self):
         # Pre-training: feature-based ML parameter estimates
         targets = len(self._prior)
-        means = np.array([np.mean(self._data[self._target == x], 0) for x in range(targets)])
-        res2 = (self._data - means[self._target]) ** 2
-        if self._homoscedastic:
-            devs = np.repeat(np.sqrt(self._sample_mean(res2))[None, :], targets, axis=0)
-        else:
-            devs = np.array([np.sqrt(np.mean(res2[self._target == x], 0)) for x in range(targets)])
-        self._means = means
-        self._devs = np.maximum(devs, self._min_rel_dev * np.max(devs))
+        self._means = np.array([np.mean(self._data[self._target == x], 0) for x in range(targets)])
+        res2 = (self._data - self._means[self._target]) ** 2
+        var = np.array([np.mean(res2[self._target == x], 0) for x in range(targets)])
+        if self._homo_sced > 0:
+            var = self._homo_sced * np.sum(self._prior[:, None] * var, 0) + (1 - self._homo_sced) * var
+        self._devs = np.sqrt(var)
 
-    def _make_basis_generator(self):
+    def _make_basis_generator(self, tiny, max_log):
         targets = len(self._prior)
+        zob = lambda z, m, s: log_lik1d(z, m, s, tiny, max_log)
         def basis_generator(data):
             examples, features = data.shape
             out = np.zeros((examples, targets, features))
             for x in range(targets):
-                out[:, x, :] = log_lik1d(data, self._means[x], self._devs[x])
+                out[:, x, :] = zob(data, self._means[x], self._devs[x])
             return out
         def basis_generator_super(data):
             examples, features = data.shape
             out = np.zeros((examples, targets, targets * features))
-            ll_ref = log_lik1d(data, self._means[self._ref_class], self._devs[self._ref_class])
+            ll_ref = zob(data, self._means[self._ref_class], self._devs[self._ref_class])
             for x in range(targets):
                 n_x = features * x
-                out[:, x, n_x:(n_x + features)] = log_lik1d(data, self._means[x], self._devs[x]) - ll_ref
+                out[:, x, n_x:(n_x + features)] = zob(data, self._means[x], self._devs[x]) - ll_ref
             return out
         if self._ref_class is None:
             return basis_generator

@@ -11,8 +11,8 @@ import pylab as pl
 TEST_SIZE = 0.2
 TOL = 1e-20
 POSITIVE_WEIGHTS = True
-HOMOSCEDASTIC = False #True
-REF_CLASS = 0
+HOMO_SCED = 0
+REF_CLASS = None
 
 
 def one_hot_encoding(target):
@@ -127,7 +127,8 @@ elr2 = Evaluator('variana', lr2, data, target, t_data, t_target)
 elr2.disp(compare=(elr,), grad_test=True)
 print('Learning time: %f sec' % info2['time'])
 
-lr3 = GaussianCompositeInference(data, target, homoscedastic=HOMOSCEDASTIC, ref_class=REF_CLASS)
+lr3 = GaussianCompositeInference(data, target, homo_sced=HOMO_SCED, ref_class=REF_CLASS)
+
 lr3.set_weight(1)
 jc = Evaluator('naive', lr3, data, target, t_data, t_target)
 jc.disp()
@@ -143,6 +144,17 @@ print('Learning time: %f sec' % info3['time'])
 print('Weight sum = %f' % np.sum(lr3.weight))
 print('Weight ratio = %f' % (np.sum(lr3.weight) / data.shape[1]))
 print('Weight sparsity = %f' % (np.sum(lr3.weight==0) / data.shape[1]))
+
+
+
+lr4 = GaussianCompositeInference(data, target, homo_sced=HOMO_SCED, ref_class=REF_CLASS, prior='empirical')
+info4 = lr4.fit(method=method, tol=TOL, positive_weights=POSITIVE_WEIGHTS)
+elr4 = Evaluator('composite', lr3, data, target, t_data, t_target)
+elr4.disp(compare=(elr, elr2), grad_test=True)
+print('Learning time: %f sec' % info4['time'])
+print('Weight sum = %f' % np.sum(lr4.weight))
+print('Weight ratio = %f' % (np.sum(lr4.weight) / data.shape[1]))
+print('Weight sparsity = %f' % (np.sum(lr4.weight==0) / data.shape[1]))
 
 print()
 classes = 1 + target.max()
@@ -168,5 +180,6 @@ def zob(idx):
 
 import pylab as pl
 pl.plot(lr3.weight)
+pl.plot(lr4.weight, 'r')
 pl.show()
 
