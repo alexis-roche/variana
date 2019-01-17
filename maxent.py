@@ -282,16 +282,16 @@ class MaxentClassifier(ConditionalMaxent):
         # Set prior and weight data accordingly
         self._target = np.asarray(target)
         targets = self._target.max() + 1
-        prop = np.array([np.mean(self._target == x) for x in range(targets)])
+        count = np.array([np.sum(self._target == x) for x in range(targets)])
         data_weighting = True
         if prior is None:
             prior = np.ones(targets)
         elif prior == 'empirical':
-            prior = prop
+            prior = count / len(self._target)
             data_weighting = False
         self._init_prior(prior)
         if data_weighting:
-            data_weight = (self._prior / prop)[target]
+            data_weight = (self._prior / count)[target]
         else:
             data_weight = None
         self._init_data(data, data_weight)
