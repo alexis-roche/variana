@@ -8,33 +8,36 @@ from .utils import sdot, minimizer, aid
 class MaxentCache(object):
 
     def __init__(self):
-        self._lda = None
+        self.reinit()
+
+    def reinit(self):        
+        self._weight = None
         self._udist = None
         self._norma = None
         self._z = None
         self._udist_basis = None
         self._grad_z = None
 
-    def same(self, lda):
-        return np.array_equal(lda, self._lda)
+    def same(self, weight):
+        return np.array_equal(weight, self._weight)
         
-    def update_z(self, lda, norma, udist, z):
-        # If lda has been modified in place, we need to copy it
-        if self._lda is None:
-            self._lda = lda
-        elif aid(lda) == aid(self._lda):
-            self._lda = lda.copy()
+    def update_z(self, weight, norma, udist, z):
+        # If weight has been modified in place, we need to copy it
+        if self._weight is None:
+            self._weight = weight
+        elif aid(weight) == aid(self._weight):
+            self._weight = weight.copy()
         else:
-            self._lda = lda
-        self._lda = lda.copy()
+            self._weight = weight
+        self._weight = weight.copy()
         self._udist = udist
         self._norma = norma
         self._z = z
         self._udist_basis = None
         self._grad_z = None
 
-    def update_grad_z(self, lda, udist_basis, grad_z):
-        if not self.same(lda):
+    def update_grad_z(self, weight, udist_basis, grad_z):
+        if not self.same(weight):
             raise ValueError('Cannot run update_grad_z before update_z')
         self._udist_basis = udist_basis
         self._grad_z = grad_z
@@ -76,33 +79,33 @@ class Maxent(object):
         if self._moment.ndim == 0:
             self._moment = self._moment[None]
 
-    def _update_z(self, lda):
-        if self._cache.same(lda):
+    def _update_z(self, weight):
+        if self._cache.same(weight):
             return
-        aux = np.dot(self._basis, lda)
+        aux = np.dot(self._basis, weight)
         norma = aux.max()
         udist = self._prior * np.exp(aux - norma)
         z = np.sum(udist)
-        self._cache.update_z(lda, norma, udist, z)
+        self._cache.update_z(weight, norma, udist, z)
 
-    def _update_z_and_grad(self, lda):
-        self._update_z(lda)
+    def _update_z_and_grad(self, weight):
+        self._update_z(weight)
         if not self._cache._grad_z is None:
             return
         udist_basis = self._cache._udist[:, None] * self._basis
         grad_z = np.sum(udist_basis, 0)
-        self._cache.update_grad_z(lda, udist_basis, grad_z)
+        self._cache.update_grad_z(weight, udist_basis, grad_z)
 
-    def dual(self, lda):
-        self._update_z(lda)
-        return np.dot(lda, self._moment) - np.log(np.maximum(self._cache._z, self._tiny)) - self._cache._norma
+    def dual(self, weight):
+        self._update_z(weight)
+        return np.dot(weight, self._moment) - np.log(np.maximum(self._cache._z, self._tiny)) - self._cache._norma
         
-    def gradient_dual(self, lda):
-        self._update_z_and_grad(lda)
+    def gradient_dual(self, weight):
+        self._update_z_and_grad(weight)
         return self._moment - self._cache._grad_z / self._cache._z
         
-    def hessian_dual(self, lda):
-        self._update_z_and_grad(lda)
+    def hessian_dual(self, weight):
+        self._update_z_and_grad(weight)
         g1 = self._cache._grad_z[:, None] / self._cache._z
         H1 = np.dot(g1, g1.T)
         H2 = np.dot(self._cache._udist_basis.T, self._basis) / self._cache._z
@@ -111,27 +114,27 @@ class Maxent(object):
     def fit(self, method='lbfgs', positive_weights=False, weight=None, tol=1e-5, maxiter=10000):
         if not weight is None:
             self.set_weight(weight)
-        f = lambda lda: -self.dual(lda)
-        grad_f = lambda lda: -self.gradient_dual(lda)
-        hess_f = lambda lda: -self.hessian_dual(lda)
+        f = lambda weight: -self.dual(weight)
+        grad_f = lambda weight: -self.gradient_dual(weight)
+        hess_f = lambda weight: -self.hessian_dual(weight)
         bounds = None
         if positive_weights:
-            bounds = [(0, None) for i in range(len(self._lda))]
-        m = minimizer(method, self._lda, f, grad_f, hess_f, bounds=bounds, tol=tol, maxiter=maxiter)
-        self._lda = m.argmin()
+            bounds = [(0, None) for i in range(len(self._weight))]
+        m = minimizer(method, self._weight, f, grad_f, hess_f, bounds=bounds, tol=tol, maxiter=maxiter)
+        self._weight = m.argmin()
         return m.info()
         
     def dist(self):
-        self._update_z(self._lda)
+        self._update_z(self._weight)
         udist = self._cache._udist
         return udist / np.sum(udist)
 
     def score(self):
-        return self.dual(self._lda)
+        return self.dual(self._weight)
 
     @property
     def weight(self):
-        return self._lda
+        return self._weight
 
     def set_weight(self, weight):
         moments = self._basis.shape[-1]
@@ -140,7 +143,7 @@ class Maxent(object):
             weight = np.full(moments, float(weight))
         if len(weight) != moments:
             raise ValueError('Inconsistent weight length')
-        self._lda = weight
+        self._weight = weight
 
     @property
     def prior(self):
@@ -161,8 +164,8 @@ def reshape_data(data):
     return out
 
 
-def safe_exp_dist(fxy, lda, prior):
-    aux = np.dot(fxy, lda)
+def safe_exp_dist(basis, weight, prior):
+    aux = np.dot(basis, weight)
     norma = aux.max(1)
     return prior * np.exp(aux - norma[:, None]), norma
 
@@ -171,7 +174,7 @@ def normalize_dist(p, tiny):
     out = np.full(p.shape, 1 / p.shape[1])
     aux = np.sum(p, 1)
     nonzero = aux > tiny
-    out[nonzero] = p / aux[nonzero][:, None]
+    out[nonzero] = p[nonzero] / aux[nonzero][:, None]
     return out
 
 
@@ -196,44 +199,45 @@ class ConditionalMaxent(Maxent):
     def _init_data(self, data, data_weight):
         self._data = reshape_data(data)
         if data_weight is None:
-            self._w = None
+            self._data_weight = None
         else:
             aux = np.asarray(data_weight)
-            self._w = aux / aux.sum()
-        if self._w is None:
+            self._data_weight = aux / aux.sum()
+        if self._data_weight is None:
             self._sample_mean = lambda x: np.mean(x, 0)
         else:
-            self._sample_mean = lambda x: np.sum(self._w.reshape([x.shape[0]] + [1] * (len(x.shape) - 1)) * x, 0)
+            ###self._sample_mean = lambda x: np.sum(self._data_weight.reshape([x.shape[0]] + [1] * (len(x.shape) - 1)) * x, 0)
+            self._sample_mean = lambda x: np.sum(self._data_weight.reshape([x.shape[0]] + [1] * (x.ndim - 1)) * x, 0)
 
     def _init_basis(self, basis_generator):
         self._basis_generator = basis_generator
         self._basis = basis_generator(self._data)
 
-    def _update_z(self, lda):
-        if self._cache.same(lda):
+    def _update_z(self, weight):
+        if self._cache.same(weight):
             return
-        udist, norma = safe_exp_dist(self._basis, lda, self._prior)
+        udist, norma = safe_exp_dist(self._basis, weight, self._prior)
         z = np.sum(udist, 1)
-        self._cache.update_z(lda, norma, udist, z)
+        self._cache.update_z(weight, norma, udist, z)
 
-    def _update_z_and_grad(self, lda):
-        self._update_z(lda)
+    def _update_z_and_grad(self, weight):
+        self._update_z(weight)
         if not self._cache._grad_z is None:
             return
         udist_basis = self._cache._udist[..., None] * self._basis
         grad_z = np.sum(udist_basis, 1)
-        self._cache.update_grad_z(lda, udist_basis, grad_z)
+        self._cache.update_grad_z(weight, udist_basis, grad_z)
 
-    def dual(self, lda):
-        self._update_z(lda)
-        return np.dot(lda, self._moment) - self._sample_mean(np.log(np.maximum(self._cache._z, self._tiny)) + self._cache._norma)
+    def dual(self, weight):
+        self._update_z(weight)
+        return np.dot(weight, self._moment) - self._sample_mean(np.log(np.maximum(self._cache._z, self._tiny)) + self._cache._norma)
 
-    def gradient_dual(self, lda):
-        self._update_z_and_grad(lda)
+    def gradient_dual(self, weight):
+        self._update_z_and_grad(weight)
         return self._moment - self._sample_mean(self._cache._grad_z / self._cache._z[:, None])
         
-    def hessian_dual(self, lda):
-        self._update_z_and_grad(lda)      
+    def hessian_dual(self, weight):
+        self._update_z_and_grad(weight)      
         g1 = self._cache._grad_z / self._cache._z[:, None]
         H1 = sdot(g1[:, :, None], g1[:, None, :])
         H2 = sdot(np.swapaxes(self._cache._udist_basis, 1, 2), self._basis) / self._cache._z[:, None, None]
@@ -241,9 +245,9 @@ class ConditionalMaxent(Maxent):
     
     def dist(self, data=None, weight=None):
         if weight is None:
-            weight = self._lda
-        self._update_z(weight)
+            weight = self._weight
         if data is None:
+            self._update_z(weight)
             return normalize_dist(self._cache._udist, self._tiny)
         p, _ = safe_exp_dist(self._basis_generator(reshape_data(data)), weight, self._prior)
         return normalize_dist(p, self._tiny)
@@ -254,9 +258,9 @@ class ConditionalMaxent(Maxent):
 
     @property
     def data_weight(self):
-        if self._w is None:
+        if self._data_weight is None:
             return np.full(self._data.shape[0], 1 / self._data.shape[0])
-        return self._w
+        return self._data_weight
 
     
 
@@ -381,9 +385,9 @@ class GaussianCompositeInference(MaxentClassifier):
     @property
     def class_weight(self):
         if self._ref_class is None:
-            return self._lda
+            return self._weight
         else:
-            return self._lda.reshape((len(self._prior), self._data.shape[1]))
+            return self._weight.reshape((len(self._prior), self._data.shape[1]))
 
 
 #########################################################################
@@ -413,7 +417,7 @@ class LogisticRegression(MaxentClassifier):
 
     @property
     def class_weight(self):
-        return self._lda.reshape((len(self._prior), 1 + self._data.shape[1]))
+        return self._weight.reshape((len(self._prior), 1 + self._data.shape[1]))
 
 
 ##################################
@@ -456,45 +460,45 @@ class MaxentGKL(object):
         self._prior /= np.sum(self._prior)
         self._fx = np.array([[1] + [basis(x, i) for i in range(len(moment))] for x in range(len(self._prior))])
         self._moment = np.concatenate(([1.], moment))
-        self._lda = np.zeros(self._fx.shape[-1])
+        self._weight = np.zeros(self._fx.shape[-1])
 
-    def _dist(self, lda):
-        return self._prior * np.exp(np.dot(self._fx, lda))
+    def _dist(self, weight):
+        return self._prior * np.exp(np.dot(self._fx, weight))
        
-    def _dist_fx(self, lda):
-        return self._dist(lda)[:, None] * self._fx
+    def _dist_fx(self, weight):
+        return self._dist(weight)[:, None] * self._fx
 
     def dist(self):
-        return self._dist(self._lda)
+        return self._dist(self._weight)
     
-    def dual(self, lda):
-        return np.dot(lda, self._moment) - np.sum(self._dist(lda)) + 1
+    def dual(self, weight):
+        return np.dot(weight, self._moment) - np.sum(self._dist(weight)) + 1
 
-    def gradient_dual(self, lda):
-        return self._moment - np.sum(self._dist_fx(lda), 0)
+    def gradient_dual(self, weight):
+        return self._moment - np.sum(self._dist_fx(weight), 0)
 
-    def hessian_dual(self, lda):
-        return -np.dot(self._dist_fx(lda).T, self._fx)
+    def hessian_dual(self, weight):
+        return -np.dot(self._dist_fx(weight).T, self._fx)
 
     def fit(self, method='lbfgs', weight=None):
 
-        def cost(lda):
-            return -self.dual(lda)
+        def cost(weight):
+            return -self.dual(weight)
             
-        def gradient_cost(lda):
-            return -self.gradient_dual(lda)
+        def gradient_cost(weight):
+            return -self.gradient_dual(weight)
         
-        def hessian_cost(lda):
-            return -self.hessian_dual(lda)
+        def hessian_cost(weight):
+            return -self.hessian_dual(weight)
                     
         if not weight is None:
-            self._lda = np.asarray(lda)
-        m = minimizer(method, self._lda, cost, gradient_cost, hessian_cost)
-        self._lda = m.argmin()
+            self._weight = np.asarray(weight)
+        m = minimizer(method, self._weight, cost, gradient_cost, hessian_cost)
+        self._weight = m.argmin()
         
     @property
     def weight(self):
-        return self._lda
+        return self._weight
 
     @property
     def prior(self):

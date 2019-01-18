@@ -8,8 +8,8 @@ FEATURES = 2
 FEATURE_CORRELATION = 0.9
 POSITIVE_WEIGHTS = True
 PRIOR = None  # 'empirical'
-HOMOSCEDASTIC = False
-SUPERCOMPOSITE = False
+HOMO_SCED = False
+REF_CLASS = None
 
 
 def random_means(classes, features):
@@ -32,7 +32,7 @@ def generate_noise(size, dim, autocorr=0):
 
 
 true_means = random_means(CLASSES, FEATURES)
-if HOMOSCEDASTIC:
+if HOMO_SCED:
     true_devs = np.repeat(random_devs(1, FEATURES), CLASSES, axis=0)   
 else:
     true_devs = random_devs(CLASSES, FEATURES)
@@ -40,7 +40,7 @@ else:
 target = np.random.randint(CLASSES, size=SIZE)
 data = true_means[target] +  generate_noise(SIZE, FEATURES, FEATURE_CORRELATION) * true_devs[target]
 
-m = GaussianCompositeInference(data, target, prior=PRIOR, supercomposite=SUPERCOMPOSITE, homoscedastic=HOMOSCEDASTIC)
+m = GaussianCompositeInference(data, target, prior=PRIOR, ref_class=REF_CLASS, homo_sced=HOMO_SCED)
 m.fit(positive_weights=POSITIVE_WEIGHTS)
 
 
