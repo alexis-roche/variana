@@ -9,10 +9,9 @@ import pylab as pl
 
 
 TEST_SIZE = 0.2
-TOL = 1e-20
-POSITIVE_WEIGHTS = True
-HOMO_SCED = 0
-REF_CLASS = None
+TOL = 1e-5
+HOMO_SCED = 1
+REF_CLASS = 0
 
 
 def one_hot_encoding(target):
@@ -97,84 +96,72 @@ class Evaluator(object):
         if isinstance(self._lr, LogisticRegression):
             print('No grad test available for sklearn implementation')
             return
-        g = self._lr.gradient_dual(self._lr.weight)
+        g = self._lr.gradient_dual(self._lr.param)
         print('Grad test = %f' % np.max(np.abs(g)))
         
     
 dataset = 'iris'
-method = 'lbfgs'
+optimizer = 'lbfgs'
 if len(sys.argv) > 1:
     dataset = sys.argv[1]
     if len(sys.argv) > 2:
-        method = sys.argv[2]
+        optimizer = sys.argv[2]
 
 data, target, t_data, t_target = load(dataset, test_size=TEST_SIZE)
 
 
-###mod = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='ovr', tol=TOL, max_iter=10000)
-mod = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='multinomial', tol=TOL, max_iter=10000)
-mod.fit(data, target)
-emod = Evaluator('sklearn', mod, data, target, t_data, t_target)
-emod.disp()
+###m = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='ovr', tol=TOL, max_iter=10000)
+m = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='multinomial', tol=TOL, max_iter=10000)
+m.fit(data, target)
+em = Evaluator('sklearn', m, data, target, t_data, t_target)
+em.disp()
 
-mod2 = LogisticRegression2(data, target)
-info2 = mod2.fit(method='lbfgs', tol=TOL)
-emod2 = Evaluator('variana', mod2, data, target, t_data, t_target)
-emod2.disp(compare=(emod,), grad_test=True)
+m2 = LogisticRegression2(data, target)
+info2 = m2.fit(optimizer='lbfgs', tol=TOL)
+em2 = Evaluator('variana', m2, data, target, t_data, t_target)
+em2.disp(compare=(em,), grad_test=True)
 print('Learning time: %f sec' % info2['time'])
 
-mod3 = GaussianCompositeInference(data, target, homo_sced=HOMO_SCED, ref_class=REF_CLASS)
+m3 = GaussianCompositeInference(data, target, homo_sced=HOMO_SCED, ref_class=REF_CLASS)
+m3.fit(objective='naive')
+Evaluator('naive', m3, data, target, t_data, t_target).disp()
+m3.fit(objective='agnostic')
+Evaluator('agnostic', m3, data, target, t_data, t_target).disp()
 
-mod3.set_weight(1)
-jc = Evaluator('naive', mod3, data, target, t_data, t_target)
-jc.disp()
-mod3.set_weight(1 / len(mod3.weight))
-jc2 = Evaluator('e-bayes', mod3, data, target, t_data, t_target)
-jc2.disp()
-mod3.set_weight(0)
-
-info3 = mod3.fit(method=method, tol=TOL, positive_weights=POSITIVE_WEIGHTS)
-emod3 = Evaluator('composite', mod3, data, target, t_data, t_target)
-emod3.disp(compare=(emod, emod2), grad_test=True)
+info3 = m3.fit(optimizer=optimizer, tol=TOL)
+em3 = Evaluator('composite', m3, data, target, t_data, t_target)
+em3.disp(compare=(em, em2), grad_test=True)
 print('Learning time: %f sec' % info3['time'])
-print('Weight sum = %f' % np.sum(mod3.weight))
-print('Weight ratio = %f' % (np.sum(mod3.weight) / data.shape[1]))
-print('Weight sparsity = %f' % (np.sum(mod3.weight==0) / data.shape[1]))
+print('Weight sum = %f' % np.sum(m3.weight))
+print('Weight ratio = %f' % (np.sum(m3.weight) / m3.weight.size))
+print('Weight sparsity = %f' % (np.sum(m3.weight==0) / m3.weight.size))
 
 
-mod4 = GaussianCompositeInference(data, target, homo_sced=HOMO_SCED, ref_class=REF_CLASS)
-info4 = mod4.fit(method=method, tol=TOL, positive_weights=False)
-emod4 = Evaluator('composite', mod4, data, target, t_data, t_target)
-emod4.disp(compare=(emod, emod2), grad_test=True)
+m4 = GaussianCompositeInference(data, target, homo_sced=HOMO_SCED, ref_class=REF_CLASS)
+info4 = m4.fit(optimizer=optimizer, tol=TOL, positive_weight=False)
+em4 = Evaluator('composite with equality constraints', m4, data, target, t_data, t_target)
+em4.disp(compare=(em, em2), grad_test=True)
 print('Learning time: %f sec' % info4['time'])
-print('Weight sum = %f' % np.sum(mod4.weight))
-print('Weight ratio = %f' % (np.sum(mod4.weight) / data.shape[1]))
-print('Weight sparsity = %f' % (np.sum(mod4.weight==0) / data.shape[1]))
 
 print()
 classes = 1 + target.max()
 print('Number of classes: %d' % classes)
 print('Number of features: %d' % data.shape[1])
 print('Number of examples: %d' % data.shape[0])
-print('Logistic regression parameters: %d' % len(mod2.weight))
-print('Composite inference parameters: %d' % len(mod3.weight))
+print('Logistic regression parameters: %d' % len(m2.param))
+print('Composite inference parameters: %d' % len(m3.param))
 print('Chance cross-entropy: %f' % np.log(classes))
 
 def zob(idx):
     pl.figure()
-    pl.plot(emod._dist[idx, :], 'b:')
-    try:
-        pl.plot(emod2._dist[idx, :], 'b')
-    except:
-        print('emod2 does not exist')
-    try:
-        pl.plot(emod3._dist[idx, :], 'orange')
-    except:
-        print('emod3 does not exist')
+    pl.plot(em._dist[idx, :], 'b:')
+    pl.plot(em2._dist[idx, :], 'b')
+    pl.plot(em3._dist[idx, :], 'red')
+    pl.plot(em4._dist[idx, :], 'orange')
     pl.show()
 
 
-pl.plot(mod3.weight)
-pl.plot(mod4.weight, 'r')
+pl.plot(m3.weight.ravel())
+pl.plot(m4.weight.ravel(), 'r')
 pl.show()
 

@@ -6,7 +6,7 @@ SIZE = 100
 CLASSES = 3
 FEATURES = 2
 FEATURE_CORRELATION = 0.9
-POSITIVE_WEIGHTS = True
+POSITIVE_WEIGHT = True
 PRIOR = None  # 'empirical'
 HOMO_SCED = False
 REF_CLASS = None
@@ -41,20 +41,20 @@ target = np.random.randint(CLASSES, size=SIZE)
 data = true_means[target] +  generate_noise(SIZE, FEATURES, FEATURE_CORRELATION) * true_devs[target]
 
 m = GaussianCompositeInference(data, target, prior=PRIOR, ref_class=REF_CLASS, homo_sced=HOMO_SCED)
-m.fit(positive_weights=POSITIVE_WEIGHTS)
+m.fit(positive_weight=POSITIVE_WEIGHT)
 
 
 ###################
 # Checks
 ###################
 
-# Weights
-print('Optimal weights = %s' % m.weight)
+# Parameters
+print('Optimal parameters = %s' % m.param)
 
 # Mean-value constraints
-print('Dual function value = %f' % m.dual(m.weight))
-print('Gradient: %s' % m.gradient_dual(m.weight))
-###print('Hessian: %s' % m.hessian_dual(m.weight))
+print('Dual function value = %f' % m.dual(m.param))
+print('Gradient: %s' % m.gradient_dual(m.param))
+###print('Hessian: %s' % m.hessian_dual(m.param))
 
 # Dual should equate with KL-divergence
 bayes_factors = m.dist() / m.prior
@@ -62,15 +62,15 @@ div = np.sum(m.data_weight * np.log(bayes_factors[range(SIZE), target]))
 print('Actual KL divergence = %f' % div)
 
 # Tests
-div_test = np.abs(div - m.dual(m.weight))
-g =  m.gradient_dual(m.weight)
+div_test = np.abs(div - m.dual(m.param))
+g =  m.gradient_dual(m.param)
 
 grad_test1 = True
-if np.max(m.weight) > 0:
-    grad_test1 = np.max(g[m.weight > 0])
+if np.max(m.param) > 0:
+    grad_test1 = np.max(g[m.param > 0])
 grad_test2 = True
-if np.min(m.weight) == 0:
-    grad_test2 = np.max(g[m.weight == 0]) < 0
+if np.min(m.param) == 0:
+    grad_test2 = np.max(g[m.param == 0]) < 0
 
 print('Div test: %f' % div_test)
 print('Grad test 1: %f' % grad_test1)

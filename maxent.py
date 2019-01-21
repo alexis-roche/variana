@@ -11,33 +11,33 @@ class MaxentCache(object):
         self.reinit()
 
     def reinit(self):        
-        self._weight = None
+        self._param = None
         self._udist = None
         self._norma = None
         self._z = None
         self._udist_basis = None
         self._grad_z = None
 
-    def same(self, weight):
-        return np.array_equal(weight, self._weight)
+    def same(self, param):
+        return np.array_equal(param, self._param)
         
-    def update_z(self, weight, norma, udist, z):
-        # If weight has been modified in place, we need to copy it
-        if self._weight is None:
-            self._weight = weight
-        elif aid(weight) == aid(self._weight):
-            self._weight = weight.copy()
+    def update_z(self, param, norma, udist, z):
+        # If param has been modified in place, we need to copy it
+        if self._param is None:
+            self._param = param
+        elif aid(param) == aid(self._param):
+            self._param = param.copy()
         else:
-            self._weight = weight
-        self._weight = weight.copy()
+            self._param = param
+        self._param = param.copy()
         self._udist = udist
         self._norma = norma
         self._z = z
         self._udist_basis = None
         self._grad_z = None
 
-    def update_grad_z(self, weight, udist_basis, grad_z):
-        if not self.same(weight):
+    def update_grad_z(self, param, udist_basis, grad_z):
+        if not self.same(param):
             raise ValueError('Cannot run update_grad_z before update_z')
         self._udist_basis = udist_basis
         self._grad_z = grad_z
@@ -63,8 +63,8 @@ class Maxent(object):
             self._basis = self._basis[:, None]
 
     def _init_optimizer(self, tiny):
+        self._param = np.zeros(self._basis.shape[-1])
         self._tiny = float(tiny)
-        self.set_weight(0)
         self._cache = MaxentCache()
         
     def _init_prior(self, prior):
@@ -79,71 +79,71 @@ class Maxent(object):
         if self._moment.ndim == 0:
             self._moment = self._moment[None]
 
-    def _update_z(self, weight):
-        if self._cache.same(weight):
+    def _update_z(self, param):
+        if self._cache.same(param):
             return
-        aux = np.dot(self._basis, weight)
+        aux = np.dot(self._basis, param)
         norma = aux.max()
         udist = self._prior * np.exp(aux - norma)
         z = np.sum(udist)
-        self._cache.update_z(weight, norma, udist, z)
+        self._cache.update_z(param, norma, udist, z)
 
-    def _update_z_and_grad(self, weight):
-        self._update_z(weight)
+    def _update_z_and_grad(self, param):
+        self._update_z(param)
         if not self._cache._grad_z is None:
             return
         udist_basis = self._cache._udist[:, None] * self._basis
         grad_z = np.sum(udist_basis, 0)
-        self._cache.update_grad_z(weight, udist_basis, grad_z)
+        self._cache.update_grad_z(param, udist_basis, grad_z)
 
-    def dual(self, weight):
-        self._update_z(weight)
-        return np.dot(weight, self._moment) - np.log(np.maximum(self._cache._z, self._tiny)) - self._cache._norma
+    def dual(self, param):
+        self._update_z(param)
+        return np.dot(param, self._moment) - np.log(np.maximum(self._cache._z, self._tiny)) - self._cache._norma
         
-    def gradient_dual(self, weight):
-        self._update_z_and_grad(weight)
+    def gradient_dual(self, param):
+        self._update_z_and_grad(param)
         return self._moment - self._cache._grad_z / self._cache._z
         
-    def hessian_dual(self, weight):
-        self._update_z_and_grad(weight)
+    def hessian_dual(self, param):
+        self._update_z_and_grad(param)
         g1 = self._cache._grad_z[:, None] / self._cache._z
         H1 = np.dot(g1, g1.T)
         H2 = np.dot(self._cache._udist_basis.T, self._basis) / self._cache._z
         return H1 - H2
         
-    def fit(self, method='lbfgs', positive_weights=False, weight=None, tol=1e-5, maxiter=10000):
-        if not weight is None:
-            self.set_weight(weight)
-        f = lambda weight: -self.dual(weight)
-        grad_f = lambda weight: -self.gradient_dual(weight)
-        hess_f = lambda weight: -self.hessian_dual(weight)
-        bounds = None
-        if positive_weights:
-            bounds = [(0, None) for i in range(len(self._weight))]
-        m = minimizer(method, self._weight, f, grad_f, hess_f, bounds=bounds, tol=tol, maxiter=maxiter)
-        self._weight = m.argmin()
+    def _optimize_param(self, optimizer, tol, maxiter, bounds):
+        f = lambda param: -self.dual(param)
+        grad_f = lambda param: -self.gradient_dual(param)
+        hess_f = lambda param: -self.hessian_dual(param)
+        m = minimizer(optimizer, self._param, f, grad_f, hess_f, bounds=bounds, tol=tol, maxiter=maxiter)
+        self._param = m.argmin()
         return m.info()
-        
+
+    def fit(self, optimizer='lbfgs', tol=1e-5, maxiter=10000):
+        return self._optimize_param(optimizer, tol, maxiter, None)
+
     def dist(self):
-        self._update_z(self._weight)
+        self._update_z(self._param)
         udist = self._cache._udist
         return udist / np.sum(udist)
 
     def score(self):
-        return self.dual(self._weight)
+        return self.dual(self._param)
 
     @property
-    def weight(self):
-        return self._weight
+    def param(self):
+        return self._param
 
-    def set_weight(self, weight):
+    """
+    def set_param(self, param):
         moments = self._basis.shape[-1]
-        weight = np.asarray(weight)
-        if weight.ndim == 0:
-            weight = np.full(moments, float(weight))
-        if len(weight) != moments:
-            raise ValueError('Inconsistent weight length')
-        self._weight = weight
+        param = np.asarray(param)
+        if param.ndim == 0:
+            param = np.full(moments, float(param))
+        if len(param) != moments:
+            raise ValueError('Inconsistent param length')
+    self._param = param
+    """
 
     @property
     def prior(self):
@@ -152,7 +152,7 @@ class Maxent(object):
 
 def reshape_data(data):
     """
-    Try to convert the input into a 2d array with shape (n_points, n_features)
+    Try to convert the input into a 2d array with shape (examples, features)
     """
     out = np.asarray(data)
     if out.ndim == 0:
@@ -164,8 +164,8 @@ def reshape_data(data):
     return out
 
 
-def safe_exp_dist(basis, weight, prior):
-    aux = np.dot(basis, weight)
+def safe_exp_dist(basis, param, prior):
+    aux = np.dot(basis, param)
     norma = aux.max(1)
     return prior * np.exp(aux - norma[:, None]), norma
 
@@ -213,43 +213,43 @@ class ConditionalMaxent(Maxent):
         self._basis_generator = basis_generator
         self._basis = basis_generator(self._data)
 
-    def _update_z(self, weight):
-        if self._cache.same(weight):
+    def _update_z(self, param):
+        if self._cache.same(param):
             return
-        udist, norma = safe_exp_dist(self._basis, weight, self._prior)
+        udist, norma = safe_exp_dist(self._basis, param, self._prior)
         z = np.sum(udist, 1)
-        self._cache.update_z(weight, norma, udist, z)
+        self._cache.update_z(param, norma, udist, z)
 
-    def _update_z_and_grad(self, weight):
-        self._update_z(weight)
+    def _update_z_and_grad(self, param):
+        self._update_z(param)
         if not self._cache._grad_z is None:
             return
         udist_basis = self._cache._udist[..., None] * self._basis
         grad_z = np.sum(udist_basis, 1)
-        self._cache.update_grad_z(weight, udist_basis, grad_z)
+        self._cache.update_grad_z(param, udist_basis, grad_z)
 
-    def dual(self, weight):
-        self._update_z(weight)
-        return np.dot(weight, self._moment) - self._sample_mean(np.log(np.maximum(self._cache._z, self._tiny)) + self._cache._norma)
+    def dual(self, param):
+        self._update_z(param)
+        return np.dot(param, self._moment) - self._sample_mean(np.log(np.maximum(self._cache._z, self._tiny)) + self._cache._norma)
 
-    def gradient_dual(self, weight):
-        self._update_z_and_grad(weight)
+    def gradient_dual(self, param):
+        self._update_z_and_grad(param)
         return self._moment - self._sample_mean(self._cache._grad_z / self._cache._z[:, None])
         
-    def hessian_dual(self, weight):
-        self._update_z_and_grad(weight)      
+    def hessian_dual(self, param):
+        self._update_z_and_grad(param)      
         g1 = self._cache._grad_z / self._cache._z[:, None]
         H1 = sdot(g1[:, :, None], g1[:, None, :])
         H2 = sdot(np.swapaxes(self._cache._udist_basis, 1, 2), self._basis) / self._cache._z[:, None, None]
         return self._sample_mean(H1 - H2)
     
-    def dist(self, data=None, weight=None):
-        if weight is None:
-            weight = self._weight
+    def dist(self, data=None, param=None):
+        if param is None:
+            param = self._param
         if data is None:
-            self._update_z(weight)
+            self._update_z(param)
             return normalize_dist(self._cache._udist, self._tiny)
-        p, _ = safe_exp_dist(self._basis_generator(reshape_data(data)), weight, self._prior)
+        p, _ = safe_exp_dist(self._basis_generator(reshape_data(data)), param, self._prior)
         return normalize_dist(p, self._tiny)
     
     @property
@@ -273,8 +273,8 @@ class MaxentClassifier(ConditionalMaxent):
 
     def __init__(self, data, target, basis_generator, prior=None, tiny=1e-100):
         """
-        data (n, n_features)
-        target (n, )
+        data (examples, features)
+        target (examples, )
         Use empirical moments
         """
         self._init_dataset(data, target, prior)
@@ -283,7 +283,7 @@ class MaxentClassifier(ConditionalMaxent):
         self._init_moment()
 
     def _init_dataset(self, data, target, prior):
-        # Set prior and weight data accordingly
+        # Set prior and param data accordingly
         self._target = np.asarray(target)
         targets = self._target.max() + 1
         count = np.array([np.sum(self._target == x) for x in range(targets)])
@@ -303,6 +303,15 @@ class MaxentClassifier(ConditionalMaxent):
     def _init_moment(self):
         # Use empirical moments
         self._moment = self._sample_mean(self._basis[range(self._basis.shape[0]), self._target])
+
+    @property
+    def targets(self):
+        return len(self._prior)
+
+    @property
+    def features(self):
+        return self._data.shape[1]
+
 
 
 #########################################################################
@@ -324,15 +333,16 @@ def mean_log_lik1d(s, tiny):
 
 class GaussianCompositeInference(MaxentClassifier):
 
-    def __init__(self, data, target, prior=None, homo_sced=0, ref_class=None, tiny=1e-100, max_log=1000):
+    def __init__(self, data, target, prior=None, homo_sced=0, ref_class=None, offset=True, tiny=1e-100, max_log=1000):
         """
-        data (n, n_features)
-        target (n, )
+        data (examples, features)
+        target (examples, )
         """
         self._homo_sced = max(0, min(1, float(homo_sced)))
         self._ref_class = None
         if not ref_class is None:
             self._ref_class = int(ref_class)
+        self._offset = bool(offset)
         self._max_log = float(max_log)
         self._init_dataset(data, target, prior)        
         self._init_training()
@@ -342,30 +352,35 @@ class GaussianCompositeInference(MaxentClassifier):
         
     def _init_training(self):
         # Pre-training: feature-based ML parameter estimates
-        targets = len(self._prior)
-        self._means = np.array([np.mean(self._data[self._target == x], 0) for x in range(targets)])
+        self._means = np.array([np.mean(self._data[self._target == x], 0) for x in range(self.targets)])
         res2 = (self._data - self._means[self._target]) ** 2
-        var = np.array([np.mean(res2[self._target == x], 0) for x in range(targets)])
+        var = np.array([np.mean(res2[self._target == x], 0) for x in range(self.targets)])
         if self._homo_sced > 0:
             var = self._homo_sced * np.sum(self._prior[:, None] * var, 0) + (1 - self._homo_sced) * var
         self._devs = np.sqrt(var)
 
     def _make_basis_generator(self, tiny, max_log):
-        targets = len(self._prior)
-        zob = lambda z, m, s: log_lik1d(z, m, s, tiny, max_log)
+        offsets = self._offset * (self.targets - 1)
+        comp_log_lik1d = lambda z, m, s: log_lik1d(z, m, s, tiny, max_log)
         def basis_generator(data):
-            examples, features = data.shape
-            out = np.zeros((examples, targets, features))
-            for x in range(targets):
-                out[:, x, :] = zob(data, self._means[x], self._devs[x])
+            out = np.zeros((data.shape[0], self.targets, offsets + self.features))
+            if self._offset:
+                for x in range(1, self.targets):
+                    out[:, x, x - 1] = 1
+            for x in range(self.targets):
+                out[:, x, offsets:] = comp_log_lik1d(data, self._means[x], self._devs[x])
             return out
         def basis_generator_super(data):
-            examples, features = data.shape
-            out = np.zeros((examples, targets, targets * features))
-            ll_ref = zob(data, self._means[self._ref_class], self._devs[self._ref_class])
-            for x in range(targets):
-                n_x = features * x
-                out[:, x, n_x:(n_x + features)] = zob(data, self._means[x], self._devs[x]) - ll_ref
+            out = np.zeros((data.shape[0], self.targets, offsets + self.features * (self.targets - 1)))
+            ll_ref = comp_log_lik1d(data, self._means[self._ref_class], self._devs[self._ref_class])
+            indexes = list(range(self.targets))
+            indexes.pop(self._ref_class)
+            if self._offset:
+                for i, x in enumerate(indexes):
+                    out[:, x, i] = 1
+            for i, x in enumerate(indexes):
+                start = offsets + self.features * i
+                out[:, x, start:(start + self.features)] = comp_log_lik1d(data, self._means[x], self._devs[x]) - ll_ref
             return out
         if self._ref_class is None:
             return basis_generator
@@ -382,12 +397,45 @@ class GaussianCompositeInference(MaxentClassifier):
             moment = moment.ravel()
         return moment
 
+    def fit(self, objective='maxent', optimizer='lbfgs', tol=1e-5, maxiter=10000, positive_weight=True):
+        if objective in ('naive', 'agnostic'):
+            self._param[0:(self._offset * (self.targets - 1))] = 0
+            if objective == 'naive':
+                aux = 1
+            else:
+                aux = 1 / self.features
+            self._param[(self._offset * (self.targets - 1)):] = aux
+            return {}
+        bounds = None
+        if positive_weight:
+            if self._offset:
+                bounds = [(None, None) for i in range(self.targets - 1)]
+            else:
+                bounds = []
+            bounds += [(0, None) for i in range(self._basis.shape[-1] - self._offset * (self.targets - 1))]
+        return self._optimize_param(optimizer, tol, maxiter, bounds)
+
     @property
-    def class_weight(self):
+    def offset(self):
+        if not self._offset:
+            return np.zeros(self.targets)
         if self._ref_class is None:
-            return self._weight
-        else:
-            return self._weight.reshape((len(self._prior), self._data.shape[1]))
+            return np.concatenate(((0,), self._param[0:(self.targets - 1)]))
+        out = np.zeros(self.targets)
+        indexes = list(range(self.targets))
+        indexes.pop(self._ref_class)
+        out[indexes] = self._param[np.arange(self.targets - 1)]
+        return out
+
+    @property
+    def weight(self):
+        if self._ref_class is None:
+            return self._param[self._offset * (self.targets - 1):]
+        out = np.zeros((self.targets, self._data.shape[1]))
+        indexes = list(range(self.targets))
+        indexes.pop(self._ref_class)
+        out[indexes, :] = self._param[self._offset * (self.targets - 1):].reshape((self.targets - 1, self._data.shape[1]))
+        return out
 
 
 #########################################################################
@@ -396,29 +444,40 @@ class GaussianCompositeInference(MaxentClassifier):
 
 class LogisticRegression(MaxentClassifier):
 
-    def __init__(self, data, target, prior=None, tiny=1e-100):
+    def __init__(self, data, target, prior=None, offset=True, tiny=1e-100):
+        self._offset = bool(offset)
         self._init_dataset(data, target, prior)
         self._init_basis(self._make_basis_generator())
         self._init_optimizer(tiny)
         self._init_moment()
 
     def _make_basis_generator(self):
-        targets = len(self._prior)
         def basis_generator(data):
-            examples, features = data.shape
-            n = features + 1
-            out = np.zeros((examples, targets, n * targets))
-            for x in range(1, targets):
-                nx = n * x
-                out[:, x, nx] = 1
-                out[:, x, (nx + 1):(nx + n)] = data
+            offsets = self._offset * (self.targets - 1)
+            out = np.zeros((data.shape[0], self.targets, offsets + self.features * (self.targets - 1)))
+            if self._offset:
+                for x in range(1, self.targets):
+                    out[:, x, x - 1] = 1
+            for x in range(1, self.targets):
+                start = offsets + self.features * (x - 1)
+                out[:, x, start:(start + self.features)] = data
             return out
         return basis_generator
 
     @property
-    def class_weight(self):
-        return self._weight.reshape((len(self._prior), 1 + self._data.shape[1]))
+    def offset(self):
+        if not self._offset:
+            return np.zeros(self.targets)
+        return np.concatenate(((0,), self._param[0:(self.targets - 1)]))
 
+    @property
+    def weight(self):
+        out = np.zeros((len(self._prior), self._data.shape[1]))
+        out[1:, :] = self._param[self._offset * (self.targets - 1):].reshape((self.targets - 1, self._data.shape[1]))
+        return out
+
+
+    
 
 ##################################
 # Obsolete, kept for testing
@@ -460,45 +519,45 @@ class MaxentGKL(object):
         self._prior /= np.sum(self._prior)
         self._fx = np.array([[1] + [basis(x, i) for i in range(len(moment))] for x in range(len(self._prior))])
         self._moment = np.concatenate(([1.], moment))
-        self._weight = np.zeros(self._fx.shape[-1])
+        self._param = np.zeros(self._fx.shape[-1])
 
-    def _dist(self, weight):
-        return self._prior * np.exp(np.dot(self._fx, weight))
+    def _dist(self, param):
+        return self._prior * np.exp(np.dot(self._fx, param))
        
-    def _dist_fx(self, weight):
-        return self._dist(weight)[:, None] * self._fx
+    def _dist_fx(self, param):
+        return self._dist(param)[:, None] * self._fx
 
     def dist(self):
-        return self._dist(self._weight)
+        return self._dist(self._param)
     
-    def dual(self, weight):
-        return np.dot(weight, self._moment) - np.sum(self._dist(weight)) + 1
+    def dual(self, param):
+        return np.dot(param, self._moment) - np.sum(self._dist(param)) + 1
 
-    def gradient_dual(self, weight):
-        return self._moment - np.sum(self._dist_fx(weight), 0)
+    def gradient_dual(self, param):
+        return self._moment - np.sum(self._dist_fx(param), 0)
 
-    def hessian_dual(self, weight):
-        return -np.dot(self._dist_fx(weight).T, self._fx)
+    def hessian_dual(self, param):
+        return -np.dot(self._dist_fx(param).T, self._fx)
 
-    def fit(self, method='lbfgs', weight=None):
+    def fit(self, optimizer='lbfgs', param=None):
 
-        def cost(weight):
-            return -self.dual(weight)
+        def cost(param):
+            return -self.dual(param)
             
-        def gradient_cost(weight):
-            return -self.gradient_dual(weight)
+        def gradient_cost(param):
+            return -self.gradient_dual(param)
         
-        def hessian_cost(weight):
-            return -self.hessian_dual(weight)
+        def hessian_cost(param):
+            return -self.hessian_dual(param)
                     
-        if not weight is None:
-            self._weight = np.asarray(weight)
-        m = minimizer(method, self._weight, cost, gradient_cost, hessian_cost)
-        self._weight = m.argmin()
+        if not param is None:
+            self._param = np.asarray(param)
+        m = minimizer(optimizer, self._param, cost, gradient_cost, hessian_cost)
+        self._param = m.argmin()
         
     @property
-    def weight(self):
-        return self._weight
+    def param(self):
+        return self._param
 
     @property
     def prior(self):
