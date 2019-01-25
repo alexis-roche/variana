@@ -40,8 +40,8 @@ else:
 target = np.random.randint(CLASSES, size=SIZE)
 data = true_means[target] +  generate_noise(SIZE, FEATURES, FEATURE_CORRELATION) * true_devs[target]
 
-m = GaussianCompositeInference(data, target, prior=PRIOR, ref_class=REF_CLASS, homo_sced=HOMO_SCED)
-m.fit(positive_weight=POSITIVE_WEIGHT)
+m = GaussianCompositeInference(data, target, prior=PRIOR, positive_weight=POSITIVE_WEIGHT, ref_class=REF_CLASS, homo_sced=HOMO_SCED)
+m.fit()
 
 
 ###################

@@ -15,12 +15,14 @@ HUGE = 1e50
 
 
 def probe_time(func):
-    def wrapper(x):
+    def wrapper(x, *args, **kwargs):
         t0 = time()
-        res = func(x)
+        res = func(x, *args, **kwargs)
         dt = time() - t0
         if res is None:
             return dt
+        elif isinstance(res, tuple):
+            return (dt,) + res
         else:
             return dt, res
     return wrapper
@@ -60,7 +62,6 @@ class SteepestDescent(object):
                  args=(),
                  maxiter=None, tol=1e-5,
                  stepsize=1, adaptive=True,
-                 damping=0,
                  proj=None):
 
         self._name = self.__class__.__name__
@@ -75,18 +76,10 @@ class SteepestDescent(object):
         self._tol = float(tol)
         self._stepsize = float(stepsize)
         self._adaptive = bool(adaptive)
-        self._damping = float(damping)
-        if self._damping == 0:
-            self._f = f
-            self._grad_f = grad_f
-            if callable(hess_f):
-                self._hess_f = hess_f
-        else:
-            self._f = lambda x, *args: f(x, *args) + .5 * self._damping * np.sum(x ** 2)
-            self._grad_f = lambda x, *args: grad_f(x, *args) + self._damping * x
-            if callable(hess_f):
-                self._hess_f = lambda x, *args: hess_f(x, *args) + self._damping * np.eye(len(x))
+        self._f = f
+        self._grad_f = grad_f
         if callable(hess_f):
+            self._hess_f = hess_f
             self._hess_f_inv = None
         else:
             if hess_f is None:
@@ -330,7 +323,6 @@ def squash(x):
 
 
 def bounds_to_proj(bounds):
-    
     replace_none = lambda x, a: a if x is None else x   
     b0 = squash(np.array([replace_none(b[0], -np.inf) for b in bounds]))
     b1 = squash(np.array([replace_none(b[1], np.inf) for b in bounds]))
@@ -345,7 +337,6 @@ def bounds_to_proj(bounds):
     else:
         if isinstance(b1, float):
             if b1 == np.inf:
-                print('cooool')
                 proj = lambda x: (x >= b0) * x
         else:
             proj = lambda x: (x >= b0) * (x <= b1) * x
@@ -357,7 +348,6 @@ def minimizer(name, x, f, grad_f, hess_f=None,
               args=(),
               maxiter=None, tol=1e-5,
               stepsize=1, adaptive=True,
-              damping=0,
               bounds=None,
               disp=False):
     """
@@ -386,7 +376,7 @@ def minimizer(name, x, f, grad_f, hess_f=None,
         return min_obj[name](x, f, grad_f, hess_f=hess_f,
                              maxiter=maxiter, tol=tol,
                              stepsize=stepsize, adaptive=adaptive,
-                             damping=damping, proj=proj)
+                             proj=proj)
 
     if not bounds is None:
         if name != 'lbfgs':

@@ -1,8 +1,7 @@
 import sys
 
-from variana.maxent import GaussianCompositeInference
-from variana.maxent import LogisticRegression as LogisticRegression2
-from sklearn.linear_model import LogisticRegression as LogisticRegression
+from variana.maxent import GaussianCompositeInference, LogisticRegression, MininfLikelihood
+from sklearn.linear_model import LogisticRegression as SklearnLR
 from sklearn import datasets
 import numpy as np
 import pylab as pl
@@ -11,7 +10,8 @@ import pylab as pl
 TEST_SIZE = 0.2
 TOL = 1e-5
 HOMO_SCED = 1
-REF_CLASS = 0
+REF_CLASS = None
+DAMPING = 0
 
 
 def one_hot_encoding(target):
@@ -52,7 +52,7 @@ class Evaluator(object):
 
     def __init__(self, name, lr, data, target, t_data, t_target):
         self._name = name
-        if isinstance(lr, LogisticRegression):
+        if isinstance(lr, SklearnLR):
             self._dist = lr.predict_proba(data)
             self._t_dist = lr.predict_proba(t_data)
         else:
@@ -93,13 +93,13 @@ class Evaluator(object):
         print('Comparison (%s/%s): %f, %d' % (self._name, other._name, *comparos(self._dist, other._dist)))
     
     def disp_grad_test(self):
-        if isinstance(self._lr, LogisticRegression):
+        if isinstance(self._lr, SklearnLR):
             print('No grad test available for sklearn implementation')
             return
         g = self._lr.gradient_dual(self._lr.param)
         print('Grad test = %f' % np.max(np.abs(g)))
         
-    
+
 dataset = 'iris'
 optimizer = 'lbfgs'
 if len(sys.argv) > 1:
@@ -109,59 +109,66 @@ if len(sys.argv) > 1:
 
 data, target, t_data, t_target = load(dataset, test_size=TEST_SIZE)
 
-
-###m = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='ovr', tol=TOL, max_iter=10000)
-m = LogisticRegression(C=np.inf, class_weight='balanced', solver='lbfgs', multi_class='multinomial', tol=TOL, max_iter=10000)
+C = 1 / max(data.shape[0] * DAMPING, 1e-100)
+###C = 1 / DAMPING
+m = SklearnLR(C=C, class_weight='balanced', multi_class='multinomial', solver='lbfgs', tol=TOL, max_iter=10000)
 m.fit(data, target)
 em = Evaluator('sklearn', m, data, target, t_data, t_target)
 em.disp()
 
-m2 = LogisticRegression2(data, target)
-info2 = m2.fit(optimizer='lbfgs', tol=TOL)
-em2 = Evaluator('variana', m2, data, target, t_data, t_target)
-em2.disp(compare=(em,), grad_test=True)
+m1 = LogisticRegression(data, target, damping=DAMPING)
+info1 = m1.fit(optimizer=optimizer, tol=TOL)
+em1 = Evaluator('variana', m1, data, target, t_data, t_target)
+em1.disp(compare=(em,), grad_test=True)
+print('Learning time: %f sec' % info1['time'])
+
+m2 = GaussianCompositeInference(data, target, damping=DAMPING, homo_sced=HOMO_SCED, ref_class=REF_CLASS)
+m2.fit(objective='naive')
+Evaluator('naive', m2, data, target, t_data, t_target).disp()
+m2.fit(objective='agnostic')
+Evaluator('agnostic', m2, data, target, t_data, t_target).disp()
+
+info2 = m2.fit(optimizer=optimizer, tol=TOL)
+em2 = Evaluator('composite', m2, data, target, t_data, t_target)
+em2.disp(compare=(em, em1), grad_test=True)
 print('Learning time: %f sec' % info2['time'])
+print('Weight sum = %f' % np.sum(m2.weight))
+print('Weight ratio = %f' % (np.sum(m2.weight) / m2.weight.size))
+print('Weight sparsity = %f' % (np.sum(m2.weight==0) / m2.weight.size))
 
-m3 = GaussianCompositeInference(data, target, homo_sced=HOMO_SCED, ref_class=REF_CLASS)
-m3.fit(objective='naive')
-Evaluator('naive', m3, data, target, t_data, t_target).disp()
-m3.fit(objective='agnostic')
-Evaluator('agnostic', m3, data, target, t_data, t_target).disp()
-
+m3 = GaussianCompositeInference(data, target, positive_weight=False, damping=DAMPING, homo_sced=HOMO_SCED, ref_class=REF_CLASS)
 info3 = m3.fit(optimizer=optimizer, tol=TOL)
-em3 = Evaluator('composite', m3, data, target, t_data, t_target)
-em3.disp(compare=(em, em2), grad_test=True)
+em3 = Evaluator('composite with equality constraints', m3, data, target, t_data, t_target)
+em3.disp(compare=(em, em1, em2), grad_test=True)
 print('Learning time: %f sec' % info3['time'])
-print('Weight sum = %f' % np.sum(m3.weight))
-print('Weight ratio = %f' % (np.sum(m3.weight) / m3.weight.size))
-print('Weight sparsity = %f' % (np.sum(m3.weight==0) / m3.weight.size))
 
-
-m4 = GaussianCompositeInference(data, target, homo_sced=HOMO_SCED, ref_class=REF_CLASS)
-info4 = m4.fit(optimizer=optimizer, tol=TOL, positive_weight=False)
-em4 = Evaluator('composite with equality constraints', m4, data, target, t_data, t_target)
-em4.disp(compare=(em, em2), grad_test=True)
-print('Learning time: %f sec' % info4['time'])
+m4 = MininfLikelihood(m2)
+info4 = m4.fit(optimizer=optimizer, tol=TOL)
+em4 = Evaluator('composite MIL', m4, data, target, t_data, t_target)
+em4.disp(compare=(em, em1, em2), grad_test=True)
 
 print()
 classes = 1 + target.max()
 print('Number of classes: %d' % classes)
 print('Number of features: %d' % data.shape[1])
 print('Number of examples: %d' % data.shape[0])
-print('Logistic regression parameters: %d' % len(m2.param))
-print('Composite inference parameters: %d' % len(m3.param))
+print('Logistic regression parameters: %d' % len(m1.param))
+print('Composite inference parameters: %d' % len(m2.param))
 print('Chance cross-entropy: %f' % np.log(classes))
 
 def zob(idx):
     pl.figure()
-    pl.plot(em._dist[idx, :], 'b:')
+    pl.plot(em._dist[idx, :], 'g:')
+    pl.plot(em2._dist[idx, :], 'g')
     pl.plot(em2._dist[idx, :], 'b')
-    pl.plot(em3._dist[idx, :], 'red')
+    pl.plot(em3._dist[idx, :], 'r')
     pl.plot(em4._dist[idx, :], 'orange')
+    pl.legend(('LR sklearn', 'LR', 'CBI', 'CBI-', 'CBI-MIL'))
     pl.show()
 
-
-pl.plot(m3.weight.ravel())
-pl.plot(m4.weight.ravel(), 'r')
+pl.figure()
+pl.plot(m2.weight.ravel())
+pl.plot(m3.weight.ravel(), 'r')
+pl.plot(m4.weight.ravel(), 'orange')
 pl.show()
 
