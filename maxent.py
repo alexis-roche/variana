@@ -63,10 +63,11 @@ class Maxent(object):
         if self._basis.ndim == 1:
             self._basis = self._basis[:, None]
         self._targets, self._params = self._basis.shape
-
+        self._examples = 0
+        
     def _init_optimizer(self, damping, bounds):
         self._param = np.zeros(self._params)
-        self._damping = np.full(self._params, damping, dtype=float)
+        self._damping = np.full(self._params, damping / max(1, self._examples), dtype=float)
         self._bounds = bounds
         self._cache = MaxentCache()
         
@@ -99,10 +100,16 @@ class Maxent(object):
         grad_log_z = np.sum(udist_basis, 0) / self._cache._z
         self._cache.update2(param, udist_basis, grad_log_z)
 
-    def dual(self, param):
-        self._update1(param)
-        return np.dot(param, self._moment) - np.log(np.maximum(self._cache._z, TINY)) - self._cache._norma
+    def relevance(self, param):
+        return np.dot(param, self._moment)
         
+    def log_partition(self, param):
+        self._update1(param)
+        return np.log(np.maximum(self._cache._z, TINY)) + self._cache._norma
+
+    def dual(self, param):
+        return self.relevance(param) - self.log_partition(param)
+
     def gradient_dual(self, param):
         self._update2(param)
         return self._moment - self._cache._grad_log_z
@@ -190,10 +197,16 @@ def safe_exp_dot(basis, param, axis=None):
 
 
 def normalize_dist(p):
+    squeeze = False
+    if p.ndim < 2:
+        squeeze = True
+        p = p[None, :]
     out = np.full(p.shape, 1 / p.shape[1])
     aux = np.sum(p, 1)
     nonzero = aux > TINY
     out[nonzero] = p[nonzero] / aux[nonzero][:, None]
+    if squeeze:
+        return out.squeeze()
     return out
 
 
@@ -250,10 +263,10 @@ class ConditionalMaxent(Maxent):
         grad_log_z = np.sum(udist_basis, 1) / self._cache._z[:, None]
         self._cache.update2(param, udist_basis, grad_log_z)
 
-    def dual(self, param):
+    def log_partition(self, param):
         self._update1(param)
-        return np.dot(param, self._moment) - self._sample_mean(np.log(np.maximum(self._cache._z, TINY)) + self._cache._norma)
-
+        return self._sample_mean(np.log(np.maximum(self._cache._z, TINY)) + self._cache._norma)
+        
     def gradient_dual(self, param):
         self._update2(param)
         return self._moment - self._sample_mean(self._cache._grad_log_z)
@@ -289,9 +302,9 @@ class ConditionalMaxent(Maxent):
         return self._sample_mean(np.sum(self.dist()[:, :, None] * self._basis, 1))
 
     
-#########################################################################
+# ***********************************************************************
 # Maxent classifier
-#########################################################################
+# ***********************************************************************
 
 class MaxentClassifier(ConditionalMaxent):
 
@@ -330,9 +343,9 @@ class MaxentClassifier(ConditionalMaxent):
 
  
 
-#########################################################################
+# ***********************************************************************
 # Bayesian composite inference
-#########################################################################
+# ***********************************************************************
 
 GAUSS_CONSTANT = .5 * np.log(2 * np.pi)
 
@@ -365,7 +378,7 @@ def make_bounds(positive_weight, params, targets, offsets):
 
 class GaussianCompositeInference(MaxentClassifier):
 
-    def __init__(self, data, target, prior=None, positive_weight=True, damping=0, homo_sced=0, ref_class=None, offset=True, max_log=1000):
+    def __init__(self, data, target, prior=None, positive_weight=True, damping=0, homo_sced=0, ref_class=None, offset=False, max_log=1000):
         """
         data (examples, features)
         target (examples, )
@@ -477,12 +490,15 @@ class GaussianCompositeInference(MaxentClassifier):
     def weight(self):
         return self._weight()
 
+    @property
+    def reference(self):
+        return normalize_dist(self._prior * np.exp(self._offset()))
     
 
     
-#########################################################################
+# ***********************************************************************
 # Logistic regression
-#########################################################################
+# ***********************************************************************
 
 class LogisticRegression(MaxentClassifier):
 
@@ -531,11 +547,14 @@ class LogisticRegression(MaxentClassifier):
     def weight(self):
         return self._weight()
 
+    @property
+    def reference(self):
+        return normalize_dist(self._prior * np.exp(self._offset()))
 
 
-#########################################################################
+# ***********************************************************************
 # Minimum information likelihood
-#########################################################################
+# ***********************************************************************
 
 class MininfLikelihood(object):
 

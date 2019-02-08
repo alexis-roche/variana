@@ -7,32 +7,41 @@ import numpy as np
 import pylab as pl
 
 
-TEST_SIZE = 0.2
 TOL = 1e-5
 HOMO_SCED = 1
-REF_CLASS = None
-DAMPING = 0
+DAMPING = 1
+MIL = False
+OPTIMIZER = 'lbfgs'
 
 
-def one_hot_encoding(target):
-    out = np.zeros((len(target), target.max() + 1))
+def one_hot_encoding(target, classes):
+    if target.ndim == 0:
+        target = target[None]
+    out = np.zeros((len(target), classes))
     out[range(len(target)), target] = 1
     return out
 
 
-def load(dataset, test_size=0.25, random_state=None):
+def load(dataset, test_size):
     loaders = {'iris': datasets.load_iris,
                'digits': datasets.load_digits,
                'wine': datasets.load_wine,
                'breast_cancer': datasets.load_breast_cancer}
-    data = loaders[dataset]()
-    data, target = data.data, data.target
+    full = loaders[dataset]()
+    data, target = full.data, full.target
     n = data.shape[0]
     n_train = int((1 - test_size) * data.shape[0])
     p = np.random.permutation(n)
     train = p[0:n_train]
-    test = p[n_train:]
-    return data[train], target[train], data[test], target[test]
+    if n_train < data.shape[0]:
+        test = p[n_train:]
+    else:
+        test = p[-1:]
+    if hasattr(full, 'feature_names'):
+        feature_names = np.array(full.feature_names)
+    else:
+        feature_names = np.arange(data.shape[1]).astype(str)
+    return data[train], target[train], data[test], target[test], feature_names
 
 
 def accuracy(target, dist):
@@ -40,7 +49,8 @@ def accuracy(target, dist):
 
 
 def cross_entropy(target, dist, tiny=1e-50):
-    return -np.sum(one_hot_encoding(target) * np.log(np.maximum(tiny, dist))) / len(target)
+    classes = dist.shape[-1]
+    return -np.sum(one_hot_encoding(target, classes) * np.log(np.maximum(tiny, dist))) / len(target)
 
 
 def comparos(d1, d2):
@@ -101,34 +111,32 @@ class Evaluator(object):
         
 
 dataset = 'iris'
-optimizer = 'lbfgs'
+test_size = .2
 if len(sys.argv) > 1:
     dataset = sys.argv[1]
     if len(sys.argv) > 2:
-        optimizer = sys.argv[2]
+        test_size = float(sys.argv[2])
 
-data, target, t_data, t_target = load(dataset, test_size=TEST_SIZE)
+data, target, t_data, t_target, feature_names = load(dataset, test_size)
 
-C = 1 / max(data.shape[0] * DAMPING, 1e-100)
-###C = 1 / DAMPING
-m = SklearnLR(C=C, class_weight='balanced', multi_class='multinomial', solver='lbfgs', tol=TOL, max_iter=10000)
+m = SklearnLR(C=1 / max(DAMPING, 1e-100), class_weight='balanced', multi_class='multinomial', solver='lbfgs', tol=TOL, max_iter=10000)
 m.fit(data, target)
 em = Evaluator('sklearn', m, data, target, t_data, t_target)
 em.disp()
 
 m1 = LogisticRegression(data, target, damping=DAMPING)
-info1 = m1.fit(optimizer=optimizer, tol=TOL)
+info1 = m1.fit(optimizer=OPTIMIZER, tol=TOL)
 em1 = Evaluator('variana', m1, data, target, t_data, t_target)
 em1.disp(compare=(em,), grad_test=True)
 print('Learning time: %f sec' % info1['time'])
 
-m2 = GaussianCompositeInference(data, target, damping=DAMPING, homo_sced=HOMO_SCED, ref_class=REF_CLASS)
+m2 = GaussianCompositeInference(data, target, damping=DAMPING, homo_sced=HOMO_SCED)
 m2.fit(objective='naive')
 Evaluator('naive', m2, data, target, t_data, t_target).disp()
 m2.fit(objective='agnostic')
 Evaluator('agnostic', m2, data, target, t_data, t_target).disp()
 
-info2 = m2.fit(optimizer=optimizer, tol=TOL)
+info2 = m2.fit(optimizer=OPTIMIZER, tol=TOL)
 em2 = Evaluator('composite', m2, data, target, t_data, t_target)
 em2.disp(compare=(em, em1), grad_test=True)
 print('Learning time: %f sec' % info2['time'])
@@ -136,16 +144,17 @@ print('Weight sum = %f' % np.sum(m2.weight))
 print('Weight ratio = %f' % (np.sum(m2.weight) / m2.weight.size))
 print('Weight sparsity = %f' % (np.sum(m2.weight==0) / m2.weight.size))
 
-m3 = GaussianCompositeInference(data, target, positive_weight=False, damping=DAMPING, homo_sced=HOMO_SCED, ref_class=REF_CLASS)
-info3 = m3.fit(optimizer=optimizer, tol=TOL)
-em3 = Evaluator('composite with equality constraints', m3, data, target, t_data, t_target)
+m3 = GaussianCompositeInference(data, target, positive_weight=True, damping=DAMPING, homo_sced=HOMO_SCED, ref_class=0, offset=True)
+info3 = m3.fit(optimizer=OPTIMIZER, tol=TOL)
+em3 = Evaluator('composite--', m3, data, target, t_data, t_target)
 em3.disp(compare=(em, em1, em2), grad_test=True)
 print('Learning time: %f sec' % info3['time'])
 
-m4 = MininfLikelihood(m2)
-info4 = m4.fit(optimizer=optimizer, tol=TOL)
-em4 = Evaluator('composite MIL', m4, data, target, t_data, t_target)
-em4.disp(compare=(em, em1, em2), grad_test=True)
+if MIL:
+    m4 = MininfLikelihood(m2)
+    info4 = m4.fit(optimizer=OPTIMIZER, tol=TOL)
+    em4 = Evaluator('composite MIL', m4, data, target, t_data, t_target)
+    em4.disp(compare=(em, em1, em2), grad_test=True)
 
 print()
 classes = 1 + target.max()
@@ -156,19 +165,21 @@ print('Logistic regression parameters: %d' % len(m1.param))
 print('Composite inference parameters: %d' % len(m2.param))
 print('Chance cross-entropy: %f' % np.log(classes))
 
-def zob(idx):
+
+def zob(idx=None):
+    if idx is None:
+        idx = np.random.randint(data.shape[0])
     pl.figure()
     pl.plot(em._dist[idx, :], 'g:')
-    pl.plot(em2._dist[idx, :], 'g')
+    pl.plot(em1._dist[idx, :], 'g')
     pl.plot(em2._dist[idx, :], 'b')
     pl.plot(em3._dist[idx, :], 'r')
-    pl.plot(em4._dist[idx, :], 'orange')
-    pl.legend(('LR sklearn', 'LR', 'CBI', 'CBI-', 'CBI-MIL'))
+    if MIL:
+        pl.plot(em4._dist[idx, :], 'orange')
+        pl.legend(('LR sklearn', 'LR', 'CBI', 'CBI-', 'MIL'))
+    else:
+        pl.legend(('LR sklearn', 'LR', 'CBI', 'CBI-'))
+    pl.plot(target[idx], 0, 'ko')
     pl.show()
 
-pl.figure()
-pl.plot(m2.weight.ravel())
-pl.plot(m3.weight.ravel(), 'r')
-pl.plot(m4.weight.ravel(), 'orange')
-pl.show()
 

@@ -5,11 +5,12 @@ from variana.maxent import GaussianCompositeInference
 SIZE = 100
 CLASSES = 3
 FEATURES = 2
-FEATURE_CORRELATION = 0.9
-POSITIVE_WEIGHT = True
+FEATURE_CORRELATION = 0.2
+POSITIVE_WEIGHT = False
 PRIOR = None  # 'empirical'
 HOMO_SCED = False
-REF_CLASS = None
+REF_CLASS = 0
+OFFSET = True
 
 
 def random_means(classes, features):
@@ -40,7 +41,7 @@ else:
 target = np.random.randint(CLASSES, size=SIZE)
 data = true_means[target] +  generate_noise(SIZE, FEATURES, FEATURE_CORRELATION) * true_devs[target]
 
-m = GaussianCompositeInference(data, target, prior=PRIOR, positive_weight=POSITIVE_WEIGHT, ref_class=REF_CLASS, homo_sced=HOMO_SCED)
+m = GaussianCompositeInference(data, target, prior=PRIOR, positive_weight=POSITIVE_WEIGHT, ref_class=REF_CLASS, homo_sced=HOMO_SCED, offset=OFFSET)
 m.fit()
 
 
