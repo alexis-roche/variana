@@ -9,8 +9,8 @@ FEATURE_CORRELATION = 0.2
 POSITIVE_WEIGHT = False
 PRIOR = None  # 'empirical'
 HOMO_SCED = False
-REF_CLASS = 0
-OFFSET = True
+REF_CLASS = None
+OFFSET = False
 
 
 def random_means(classes, features):
@@ -76,4 +76,8 @@ if np.min(m.param) == 0:
 print('Div test: %f' % div_test)
 print('Grad test 1: %f' % grad_test1)
 print('Grad test 2: %s' % grad_test2)
+
+
+
+
 

@@ -364,7 +364,8 @@ def step_vector(size, start, val):
     out = np.zeros(size)
     out[start:] = val   
     return out
-    
+
+
 def make_bounds(positive_weight, params, targets, offsets):
     if not positive_weight:
         return None
@@ -411,18 +412,18 @@ class GaussianCompositeInference(MaxentClassifier):
         targets = len(self._prior)
         features = self._data.shape[1]
         offsets = self._use_offset * (targets - 1)
-        comp_log_lik1d = lambda z, m, s: log_lik1d(z, m, s, max_log)
+        basis_fun = lambda z, m, s: log_lik1d(z, m, s, max_log)
         def basis_generator(data):
             out = np.zeros((data.shape[0], targets, offsets + features))
             if self._use_offset:
                 for x in range(1, targets):
                     out[:, x, x - 1] = 1
             for x in range(targets):
-                out[:, x, offsets:] = comp_log_lik1d(data, self._means[x], self._devs[x])
+                out[:, x, offsets:] = basis_fun(data, self._means[x], self._devs[x])
             return out
         def basis_generator_super(data):
             out = np.zeros((data.shape[0], targets, offsets + features * (targets - 1)))
-            ll_ref = comp_log_lik1d(data, self._means[self._ref_class], self._devs[self._ref_class])
+            ll_ref = basis_fun(data, self._means[self._ref_class], self._devs[self._ref_class])
             indexes = list(range(targets))
             indexes.pop(self._ref_class)
             if self._use_offset:
@@ -430,7 +431,7 @@ class GaussianCompositeInference(MaxentClassifier):
                     out[:, x, i] = 1
             for i, x in enumerate(indexes):
                 start = offsets + features * i
-                out[:, x, start:(start + features)] = comp_log_lik1d(data, self._means[x], self._devs[x]) - ll_ref
+                out[:, x, start:(start + features)] = basis_fun(data, self._means[x], self._devs[x]) - ll_ref
             return out
         if self._ref_class is None:
             return basis_generator
@@ -697,3 +698,10 @@ class MininfLikelihood(object):
         if hasattr(self._obj, 'weight'):
             return self._obj._weight(self._param)
         raise ValueError('underlying method has no weight attribute')
+
+
+
+###############################################
+# Interpretation WIP
+###############################################
+

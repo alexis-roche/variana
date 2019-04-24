@@ -8,8 +8,8 @@ import pylab as pl
 
 
 TOL = 1e-5
-HOMO_SCED = 1
-DAMPING = 1
+HOMO_SCED = 0
+DAMPING = 1e-2
 MIL = False
 OPTIMIZER = 'lbfgs'
 
@@ -22,6 +22,11 @@ def one_hot_encoding(target, classes):
     return out
 
 
+def replace_string(seq, s_in, s_out):
+    replace = lambda x: x if x != s_in else s_out
+    return list(map(replace, seq))
+        
+
 def load(dataset, test_size):
     loaders = {'iris': datasets.load_iris,
                'digits': datasets.load_digits,
@@ -29,18 +34,25 @@ def load(dataset, test_size):
                'breast_cancer': datasets.load_breast_cancer}
     full = loaders[dataset]()
     data, target = full.data, full.target
-    n = data.shape[0]
+    if hasattr(full, 'feature_names'):
+        feature_names = np.array(full.feature_names)
+    else:
+        feature_names = np.arange(data.shape[1]).astype(str)
+
+    # heuristics
+    feature_names = replace_string(feature_names, 'od280/od315_of_diluted_wines', 'od280/od315')
+
+    if test_size <= 0:
+        return data, target, data, target, feature_names
+
+    p = np.random.permutation(data.shape[0])
     n_train = int((1 - test_size) * data.shape[0])
-    p = np.random.permutation(n)
     train = p[0:n_train]
     if n_train < data.shape[0]:
         test = p[n_train:]
     else:
         test = p[-1:]
-    if hasattr(full, 'feature_names'):
-        feature_names = np.array(full.feature_names)
-    else:
-        feature_names = np.arange(data.shape[1]).astype(str)
+        
     return data[train], target[train], data[test], target[test], feature_names
 
 
@@ -166,7 +178,7 @@ print('Composite inference parameters: %d' % len(m2.param))
 print('Chance cross-entropy: %f' % np.log(classes))
 
 
-def zob(idx=None):
+def disp_comp(idx=None):
     if idx is None:
         idx = np.random.randint(data.shape[0])
     pl.figure()
@@ -183,3 +195,68 @@ def zob(idx=None):
     pl.show()
 
 
+##################################################
+
+def analyze(mod, y):
+    aux = mod._basis_generator(y[None, :])
+    decomp = mod.param * aux.squeeze()
+    aux = mod._basis_generator(mod._means) - aux
+    d2 = 2 * aux[range(mod._targets), range(mod._targets), :]
+    return decomp, d2
+
+
+def disp_expert(idx=None, fname=None, size=[14, 5], confidence=.95, comp=None):
+
+    from scipy.stats import chi2
+    if idx is None:
+        idx = np.random.randint(data.shape[0])
+    print('Index: %d' % idx)
+    y = data[idx, :]
+    x = target[idx]
+    p = m2.dist(y[None, :]).squeeze()
+    if comp is None:
+        xp0, xp = np.argsort(p)[-2:]
+    else:
+        xp, xp0 = comp
+    decomp, d2 = analyze(m2, y)
+    check = decomp[xp] - decomp[xp0]
+    pval = chi2.cdf(d2[xp], df=1)
+
+    pl.figure()
+    pl.bar(range(len(feature_names)), check, color='silver')
+    xticks = []
+    for i, f in enumerate(feature_names):
+        if i % 2:
+            s = '\n' + f
+        else:
+            s = f + '\n'
+        xticks.append(s)
+
+    pl.xticks(range(len(feature_names)), xticks, fontsize=10)
+    x0, x1, _, _ = pl.axis()
+    pl.plot((x0, x1), (0, 0), 'k', linewidth=1)
+
+    for i, pv in enumerate(pval):
+        print(pv)
+        color = 'green'
+        if pv > confidence:
+            color = 'red'
+        pl.plot(i, pv * check[i], 'o', color=color)
+    pl.ylabel('Weighted log-likelihood')
+    pl.title('Class comparison: %d vs %d' % (xp + 1, xp0 + 1))
+    f = pl.gcf()
+    print(f.get_size_inches())
+    f.set_size_inches(size)
+    pl.show()
+    
+    print('Target: %d' % (x + 1))
+    print('Prediction: %d' % (xp + 1))
+    #print('Predictive proba = %f, %f' % (p[xp], p[xp0]))
+
+    if not fname is None:
+        pl.savefig(fname, bbox_inches='tight', pad_inches=0)
+    
+    return p,xp,xp0
+
+
+# 166, 73
