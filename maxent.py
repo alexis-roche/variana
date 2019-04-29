@@ -1,7 +1,7 @@
 import numpy as np
 import scipy.optimize as spo
 
-from .utils import sdot, minimizer, aid, probe_time
+from .utils import sdot, minimizer, probe_time
 
 TINY = 1e-100
 
@@ -11,26 +11,27 @@ class MaxentCache(object):
     def __init__(self):
         self.reinit()
 
-    def reinit(self):        
+    def reinit(self, inplace_update=False):        
         self._param = None
         self._udist = None
         self._norma = None
         self._z = None
         self._udist_basis = None
         self._grad_log_z = None
+        self._inplace_update = inplace_update
 
     def same(self, param):
         return np.array_equal(param, self._param)
-        
-    def update1(self, param, norma, udist, z):
-        # If param has been modified in place, we need to copy it
-        if self._param is None:
-            self._param = param
-        elif aid(param) == aid(self._param):
+
+    def _store_param(self, param):
+        # If param is modified in place, we need to copy it
+        if self._inplace_update:
             self._param = param.copy()
         else:
             self._param = param
-        self._param = param.copy()
+   
+    def update1(self, param, norma, udist, z):
+        self._store_param(param)
         self._udist = udist
         self._norma = norma
         self._z = z
@@ -39,7 +40,7 @@ class MaxentCache(object):
 
     def update2(self, param, udist_basis, grad_log_z):
         if not self.same(param):
-            raise ValueError('Cannot run update2 before update1')
+            raise RuntimeError('Cannot run update2 before update1')
         self._udist_basis = udist_basis
         self._grad_log_z = grad_log_z
 
@@ -100,15 +101,11 @@ class Maxent(object):
         grad_log_z = np.sum(udist_basis, 0) / self._cache._z
         self._cache.update2(param, udist_basis, grad_log_z)
 
-    def relevance(self, param):
-        return np.dot(param, self._moment)
-        
-    def log_partition(self, param):
-        self._update1(param)
-        return np.log(np.maximum(self._cache._z, TINY)) + self._cache._norma
-
     def dual(self, param):
-        return self.relevance(param) - self.log_partition(param)
+        self._update1(param)
+        relevance = np.dot(param, self._moment)
+        log_partition = np.log(np.maximum(self._cache._z, TINY)) + self._cache._norma
+        return relevance - log_partition
 
     def gradient_dual(self, param):
         self._update2(param)
@@ -121,6 +118,7 @@ class Maxent(object):
         return H1 - H2
         
     def _opt_param(self, optimizer, tol, maxiter):
+        self._cache.reinit(inplace_update=optimizer in ('lbfgs',))
         if self._damping.max() == 0:
             f = lambda param: -self.dual(param)
             grad_f = lambda param: -self.gradient_dual(param)
@@ -263,10 +261,12 @@ class ConditionalMaxent(Maxent):
         grad_log_z = np.sum(udist_basis, 1) / self._cache._z[:, None]
         self._cache.update2(param, udist_basis, grad_log_z)
 
-    def log_partition(self, param):
+    def dual(self, param):
         self._update1(param)
-        return self._sample_mean(np.log(np.maximum(self._cache._z, TINY)) + self._cache._norma)
-        
+        relevance = np.dot(param, self._moment)
+        log_partition = self._sample_mean(np.log(np.maximum(self._cache._z, TINY)) + self._cache._norma)
+        return relevance - log_partition
+    
     def gradient_dual(self, param):
         self._update2(param)
         return self._moment - self._sample_mean(self._cache._grad_log_z)

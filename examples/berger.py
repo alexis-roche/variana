@@ -1,5 +1,6 @@
 from variana.maxent import *
 
+optimizer = 'lbfgs'
 
 def basis_fn(data=None):
     x = np.arange(6)
@@ -10,13 +11,13 @@ def basis_fn(data=None):
 
 
 m = Maxent(basis_fn(), (.3, .5))
-m.fit()
+m.fit(optimizer=optimizer)
 p = m.dist()
 print(m.param)
 
 data =  (0, 1, 0, 1, 0, 1, 0, 1)
 mc = ConditionalMaxent(basis_fn, (.3, .5), data)
-mc.fit()
+mc.fit(optimizer=optimizer)
 pc = mc.dist(0)
 print(mc.param)
 
