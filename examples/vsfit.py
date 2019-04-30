@@ -1,7 +1,7 @@
 import numpy as np
 from variana import VariationalSampler
 
-DIM = 20
+DIM = 10
 
 
 def target(x, beta=2):
@@ -10,8 +10,8 @@ def target(x, beta=2):
     returns an array with shape (n,) that contains the corresponding
     target log-distribution values.
     """
-    ###return -np.sum(np.abs(x) ** beta, 0) / beta
-    return -np.sum(((-1) ** np.arange(DIM)) * np.abs(x) ** beta, 0) / beta
+    return -np.sum(np.abs(x) ** beta, 0) / beta
+    ###return -np.sum(((-1) ** np.arange(DIM)) * np.abs(x) ** beta, 0) / beta
 
 
 """
@@ -25,12 +25,13 @@ v = np.ones(DIM)
 Create a variational sampler object.
 """
 #vs = VariationalSampler(target, (m, v), ndraws = 100 * DIM)
-vs = VariationalSampler(target, (m, v))
+vs = VariationalSampler(target, (m, v), gamma2=3)
 
 """
 Perform fitting.
 """
-f = vs.fit(family='factor_gaussian')
+f = vs.fit(family='factor_gaussian', minimizer='lbfgs')
+#f = vs.fit(family='factor_gaussian')
 #f = vs.fit()
 
 """

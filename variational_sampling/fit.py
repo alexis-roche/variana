@@ -92,13 +92,13 @@ class VariationalFit(object):
         """
         Compute fit
         """
-        if not theta is self._theta:
-            self._log_gn = np.dot(self._F.T, theta) - self.sample._logscale
-            self._gn = np.exp(self._log_gn)
-            self._theta = theta
-            fail = np.isinf(self._log_gn).max() or np.isinf(self._gn).max()
-        else:
-            fail = False
+        if not self.minimizer in ('lbfgs',):
+            if theta is self._theta:
+                return True
+        self._log_gn = np.dot(self._F.T, theta) - self.sample._logscale
+        self._gn = np.exp(self._log_gn)
+        self._theta = theta
+        fail = np.isinf(self._log_gn).max() or np.isinf(self._gn).max()
         return not fail
 
     def _loss(self, theta):
