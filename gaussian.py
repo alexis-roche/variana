@@ -3,7 +3,8 @@ A class to represent unnormalized Gaussian distributions.
 """
 
 import numpy as np
-
+from scipy.stats import norm
+ 
 from .utils import (force_tiny, force_finite, hdot, decomp_sym_matrix)
 
 
@@ -35,7 +36,12 @@ def _sample_dim(dim):
     return int(-1.5 + np.sqrt(.25 + 2 * dim))
 
 
-def _quad3(m, sqrtV, gamma2):
+def silver_section(dim):
+    aux = .5 * ( 1 + (1 / (2 * dim + 1)) ** (1 / dim))
+    return np.exp(- .5 * norm.ppf(aux) ** 2) / (np.sqrt(2 * np.pi) * (1 - aux))
+
+
+def _quad3(m, sqrtV, shift):
     """
     Return point and weight arrays with respective shapes (dim, 2*dim+1) and (2*dim+1,)
     """
@@ -43,13 +49,17 @@ def _quad3(m, sqrtV, gamma2):
     npts = 2 * dim + 1
     # create output arrays
     xs = np.zeros((dim, npts))
-    ws = np.zeros(npts)
     # compute weights
-    tmp = 1 / float(gamma2)
-    ws[0] = 1 - dim * tmp
-    ws[1:] = .5 * tmp
+    if shift == 'auto':
+        ws = np.full(npts, 1 / npts)
+        shift = silver_section(dim)
+    else:
+        ws = np.zeros(npts)
+        tmp = 1 / (shift ** 2)
+        ws[0] = 1 - dim * tmp
+        ws[1:] = .5 * tmp
     # compute points
-    tmp = np.sqrt(gamma2) * sqrtV
+    tmp = shift * sqrtV
     xs.T[...] = m.T
     xs[:, 1:(dim + 1)] += tmp
     xs[:, (dim + 1):] -= tmp

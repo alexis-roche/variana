@@ -1,7 +1,7 @@
 import numpy as np
 from variana import VariationalSampler
 
-DIM = 10
+DIM = 100
 
 
 def target(x, beta=2):
@@ -25,7 +25,7 @@ v = np.ones(DIM)
 Create a variational sampler object.
 """
 #vs = VariationalSampler(target, (m, v), ndraws = 100 * DIM)
-vs = VariationalSampler(target, (m, v), gamma2=3)
+vs = VariationalSampler(target, (m, v))
 
 """
 Perform fitting.

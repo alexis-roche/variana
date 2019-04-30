@@ -33,7 +33,7 @@ def sample_fun(f, x):
 
 class VariationalSampler(object):
 
-    def __init__(self, target, cavity, gamma2=None, ndraws=None, reflect=False):
+    def __init__(self, target, cavity, shift='auto', ndraws=None, reflect=False):
         """Variational sampler class.
 
         Fit a target factor with a Gaussian distribution by maximizing
@@ -57,10 +57,13 @@ class VariationalSampler(object):
 
         reflect: bool
           if True, reflect the sample about the cavity mean
+
+        shift: 'auto' or float
+          Defines the one-dimensional shift parameter for quadrature          
         """
         self.cavity = as_normalized_gaussian(cavity)
         self.target = target
-        self.gamma2 = gamma2
+        self.shift = shift
         self.ndraws = ndraws
         self.reflect = reflect
 
@@ -75,9 +78,7 @@ class VariationalSampler(object):
         compute associated distribution values.
         """
         if self.ndraws is None:
-            if self.gamma2 is None:
-                self.gamma2 = self.cavity.dim + .5
-            self.x, self.w = self.cavity.quad3(self.gamma2)
+            self.x, self.w = self.cavity.quad3(self.shift)
             self.reflect = True
         else:
             self.x = self.cavity.random(ndraws=self.ndraws)
@@ -147,7 +148,7 @@ def laplace_approx(u, g, h, cavity, optimize=True):
 class NumEP(object):
 
     def __init__(self, utility, batches, prior, guess=None, niters=1, 
-                 gamma2=None, ndraws=None, reflect=None, method='variational',
+                 shift=None, ndraws=None, reflect=None, method='variational',
                  gradient=None, hessian=None, step=1e-5, minimizer='newton'):
         """
         Assume: utility = fn(x, i)
@@ -163,7 +164,7 @@ class NumEP(object):
         else:
             self.approx_factors = [as_normalized_gaussian(guess) for a in batches]
         self.niters = niters
-        self.gamma2 = gamma2
+        self.shift = shift
         self.ndraws = ndraws
         self.reflect = reflect
         self.method = method
@@ -191,7 +192,7 @@ class NumEP(object):
         target = lambda x: self.utility(x, a)
         cavity = self.cavity(a)
         if self.method in ('quadrature', 'variational'):
-            v = VariantionalSampler(target, cavity, gamma2=self.gamma2, ndraws=self.ndraws, reflect=self.reflect)
+            v = VariantionalSampler(target, cavity, shift=self.shift, ndraws=self.ndraws, reflect=self.reflect)
             prop = v.fit(method=self.method, family=cavity.family, **self.args).gaussian
         elif self.method in ('laplace', 'quick_laplace'):
             if self.gradient is None:
@@ -234,7 +235,7 @@ class NumEP(object):
 class IncrementalEP(object):
 
     def __init__(self, prior, guess=None, niters=1, 
-                 gamma2=None, ndraws=None, reflect=None, method='variational',
+                 shift=None, ndraws=None, reflect=None, method='variational',
                  step=1e-5, minimizer='newton'):
         """
         Assume: utility = fn(x, i)
@@ -242,7 +243,7 @@ class IncrementalEP(object):
         self.prior = as_normalized_gaussian(prior)
         self.dim = self.prior.dim
         self.niters = niters
-        self.gamma2 = gamma2
+        self.shift = shift
         self.ndraws = ndraws
         self.reflect = reflect
         self.method = method
@@ -261,7 +262,7 @@ class IncrementalEP(object):
 
         # compute a candidate for the factor approximation 
         if self.method in ('quadrature', 'variational'):
-            v = VariationalSampler(utility, self._gaussian, gamma2=self.gamma2, ndraws=self.ndraws, reflect=self.reflect)
+            v = VariationalSampler(utility, self._gaussian, shift=self.shift, ndraws=self.ndraws, reflect=self.reflect)
             prop = v.fit(method=self.method, family=self._gaussian.family, **self.args).gaussian
         elif self.method in ('laplace', 'quick_laplace'):
             if gradient is None:
