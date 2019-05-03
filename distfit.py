@@ -29,7 +29,7 @@ def lambdify_target(f, x):
 
 class VariationalSampler(object):
 
-    def __init__(self, target, cavity, shift='auto', ndraws=None, reflect=False):
+    def __init__(self, target, cavity, rule='balanced', ndraws=None, reflect=False):
         """Variational sampler class.
 
         Fit a target factor with a Gaussian distribution by maximizing
@@ -54,12 +54,13 @@ class VariationalSampler(object):
         reflect: bool
           if True, reflect the sample about the cavity mean
 
-        shift: 'auto' or float
-          Defines the one-dimensional shift parameter for quadrature          
+        rule: str
+          Defines the underlying one-dimensional quadrature precision-3 rule
+          One of 'balanced' or 'optimal_d4', 'exact_d3_uniform', 'exact_d3_positive'
         """
         self._cavity = as_gaussian(cavity)
         self._target = target
-        self._shift = shift
+        self._rule = rule
         self._ndraws = ndraws
         self._reflect = reflect
 
@@ -73,7 +74,7 @@ class VariationalSampler(object):
         compute associated distribution values.
         """
         if self._ndraws is None:
-            self._x, self._w = self._cavity.quad3(self._shift)
+            self._x, self._w = self._cavity.quad3(self._rule)
             self._reflect = True
         else:
             self._x = self._cavity.random(ndraws=self._ndraws)
@@ -178,7 +179,7 @@ class MomentFit(object):
 
     def gaussian(self):
         if self._global_fit:
-            return self._gaussian.rescale(self._sample._cavity.Z)
+            return self._sample._cavity.Z * self._gaussian
         else:
             return self._gaussian / self._sample._cavity.normalize()
 

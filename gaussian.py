@@ -20,12 +20,19 @@ def K_to_Z(K, dim, detV):
     return K * (2 * np.pi) ** (.5 * dim) * detV ** .5
 
 
-def _invV_to_theta(invV):
+def invV_to_theta(invV):
     A = -invV + .5 * np.diag(np.diagonal(invV))
     return A[np.triu_indices(A.shape[0])]
 
 
-def _theta_to_invV(theta):
+def moments_to_theta(K, m, invV):
+    theta2 = invV_to_theta(invV)
+    theta1 = np.dot(invV, m)
+    theta0 = np.log(K) - .5 * np.dot(m, theta1)
+    return np.concatenate((np.array((theta0,)), theta1, theta2))
+
+
+def theta_to_invV(theta):
     dim = int(-1 + np.sqrt(1 + 8 * theta.size)) / 2
     A = np.zeros([dim, dim])
     A[np.triu_indices(dim)] = theta
@@ -41,7 +48,7 @@ def silver_section(dim):
     return np.exp(- .5 * norm.ppf(aux) ** 2) / (np.sqrt(2 * np.pi) * (1 - aux))
 
 
-def _quad3(m, sqrtV, shift):
+def _quad3(m, sqrtV, rule):
     """
     Return point and weight arrays with respective shapes (dim, 2*dim+1) and (2*dim+1,)
     """
@@ -50,10 +57,18 @@ def _quad3(m, sqrtV, shift):
     # create output arrays
     xs = np.zeros((dim, npts))
     # compute weights
-    if shift == 'auto':
+    if rule == 'balanced':
         ws = np.full(npts, 1 / npts)
         shift = silver_section(dim)
     else:
+        if rule == 'optimal_d4':
+            shift = np.sqrt(3)
+        elif rule == 'exact_d3_uniform':
+            shift = np.sqrt(dim + .5)
+        elif rule == 'exact_d3_positive':
+            shift = np.sqrt(dim)
+        else:
+            shift = rule        
         ws = np.zeros(npts)
         tmp = 1 / (shift ** 2)
         ws[0] = 1 - dim * tmp
@@ -72,30 +87,33 @@ class Gaussian(object):
     form:
 
     g(x) = K exp[(x-m)'*A*(x-m)] with A = -.5*inv(V)
+
+    theta_dim = (dim * (dim + 1)) / 2 + dim + 1
     """
     def __init__(self, m=None, V=None, K=None, Z=None, theta=None):
-        self._family = 'gaussian'
         # If theta is provided, ignore other parameters
         if not theta is None:
             self._set_theta(theta)
+            self._dim = _sample_dim(len(self._theta))
         else:
-            self._set_moments(m, V, K, Z)
+            m = np.asarray(m)
+            self._dim = m.size
+            m = np.reshape(m, (self._dim,))
+            V = np.reshape(np.asarray(V), (self._dim, self._dim))
+            self._fill_cache_from_moments(m, V, K, Z)
+            self._theta = moments_to_theta(self._K, self._m, self._invV)
 
-    def _set_dimensions(self, dim):
-        """
-        Set dimensional parameters
-        """
-        self._dim = dim
-        self._theta_dim = (dim * (dim + 1)) / 2 + dim + 1
+    def _init_cache(self):
+        self._K = None
+        self._Z = None
+        self._m = None
+        self._V = None
+        self._invV = None
+        self._detV = None
+        self._sqrtV = None
 
-    def _set_moments(self, m, V, K=None, Z=None):
-        m = np.asarray(m)
-        dim = m.size
-        self._set_dimensions(dim)
+    def _fill_cache_from_moments(self, m, V, K=None, Z=None):
         # Mean and variance
-        m = force_finite(np.reshape(m, (dim,)))
-        V = force_finite(np.reshape(np.asarray(V), (dim, dim)))
-        self._dim = dim
         self._m = m
         self._V = V
         # Compute the inverse and the square root of the variance
@@ -107,65 +125,20 @@ class Gaussian(object):
         # Normalization constant
         if not K is None:
             self._K = float(K)
-            self._Z = None
+            self._Z = K_to_Z(self._K, self._dim, self._detV)
         else:
             if Z is None:
                 Z = 1.0
             self._K = Z_to_K(Z, self._dim, self._detV)
             self._Z = Z
 
-    @property
-    def dim(self):
-        return self._dim
-
-    @property
-    def theta_dim(self):
-        return self._theta_dim
-
-    @property
-    def K(self):
-        return self._K
-
-    @property
-    def Z(self):
-        """
-        Compute the normalizing constant
-        """
-        if not self._Z is None:
-            return self._Z
-        self._Z = K_to_Z(self._K, self._dim, self._detV)
-        return self._Z
-
-    @property
-    def m(self):
-        return self._m
-
-    @property
-    def V(self):
-        return self._V
-
-    @property
-    def invV(self):
-        return self._invV
-
-    @property
-    def sqrtV(self):
-        return self._sqrtV
-
-    def _get_theta(self):
-        theta2 = _invV_to_theta(self._invV)
-        theta1 = np.dot(self._invV, self._m)
-        theta0 = np.log(self._K) - .5 * np.dot(self._m, theta1)
-        return np.concatenate((np.array((theta0,)), theta1, theta2))
-
-    def _set_theta(self, theta):
+    def _fill_cache(self):
         """
         Convert theta to K, m, V
         """
-        theta = np.asarray(theta)
-        dim = _sample_dim(theta.size)
-        self._set_dimensions(dim)
-        invV = _theta_to_invV(theta[(dim + 1):])
+        theta = self._theta
+        dim = self._dim
+        invV = theta_to_invV(theta[(dim + 1):])
         abs_s, sign_s, P = decomp_sym_matrix(invV)
         self._invV = invV
         inv_s = sign_s / abs_s
@@ -173,48 +146,107 @@ class Gaussian(object):
         self._detV = np.prod(inv_s)
         self._sqrtV = np.dot(np.dot(P, np.diag(abs_s ** - .5)), P.T)
         self._m = np.dot(self._V, theta[1:(dim + 1)])
-        #self._K = np.exp(theta[0] + .5 * hdot(self._m, invV))
         self._K = force_finite(force_tiny(np.exp(theta[0] + .5 * hdot(self._m, invV))))
-        self._Z = None
-        
+        self._Z = K_to_Z(self._K, self._dim, self._detV)
+
+    @property
+    def dim(self):
+        return self._dim
+
+    @property
+    def K(self):
+        # exponential factor
+        if self._K is None:
+            self._fill_cache()
+        return self._K
+
+    @property
+    def Z(self):
+        # normalizing constant
+        if self._Z is None:
+            self._fill_cache()
+        return self._Z
+
+    @property
+    def m(self):
+        if self._m is None:
+            self._fill_cache()
+        return self._m
+
+    @property
+    def V(self):
+        if self._V is None:
+            self._fill_cache()
+        return self._V
+
+    @property
+    def invV(self):
+        if self._invV is None:
+            self._fill_cache()
+        return self._invV
+
+    @property
+    def sqrtV(self):
+        if self._sqrtV is None:
+            self._fill_cache()
+        return self._sqrtV
+
+    def _get_theta(self):
+        return self._theta
+    
+    def _set_theta(self, theta):
+        self._theta = np.asarray(theta).squeeze()
+        self._init_cache()
+      
     theta = property(_get_theta, _set_theta)
 
     def mahalanobis(self, xs):
         if xs.ndim == 1:
-            m = self._m
+            m = self.m
         else:
-            m = np.expand_dims(self._m, -1)
+            m = np.expand_dims(self.m, -1)
         ys = xs - m
-        return np.sum(ys * np.dot(self._invV, ys), 0)
+        return np.sum(ys * np.dot(self.invV, ys), 0)
 
     def log(self, xs):
-        return np.log(self._K) - .5 * self.mahalanobis(xs)
+        return np.log(self.K) - .5 * self.mahalanobis(xs)
 
     def __call__(self, xs):
         """
         Evaluate the Gaussian at specified points.
         xs must have shape (dim, npts)
         """
-        return self._K * np.exp(-.5 * self.mahalanobis(xs))
+        return self.K * np.exp(-.5 * self.mahalanobis(xs))
+
+    def copy(self):
+        return self.__class__(theta=self._theta)
+
+    def __rmul__(self, c):
+        theta = self._theta.copy()
+        theta[0] += np.log(c)
+        return self.__class__(theta=theta)
+
+    def normalize(self):
+        return (1 / self.Z) * self
 
     def __mul__(self, other):
-        return self.__class__(theta=self.theta + other.theta)
+        return self.__class__(theta=self._theta + other._theta)
         
     def __truediv__(self, other):
-        return self.__class__(theta=self.theta - other.theta)
+        return self.__class__(theta=self._theta - other._theta)
         
     def __pow__(self, power):
-        return self.__class__(theta=power * self.theta)
+        return self.__class__(theta=power * self._theta)
 
     def random(self, ndraws=1):
         """
         Return an array with shape (dim, ndraws)
         """
-        xs = np.dot(self._sqrtV, np.random.normal(size=(self._dim, ndraws)))
-        return (self._m + xs.T).T  # preserves shape
+        xs = np.dot(self.sqrtV, np.random.normal(size=(self._dim, ndraws)))
+        return (self.m + xs.T).T  # preserves shape
 
-    def quad3(self, gamma2):
-        return _quad3(self._m, self._sqrtV, gamma2)
+    def quad3(self, rule):
+        return _quad3(self.m, self.sqrtV, rule)
 
     def kl_div(self, other):
         """
@@ -225,18 +257,18 @@ class Gaussian(object):
         if np.isinf(other_Z):
             return np.inf
         Z = self.Z
-        dm = self._m - other._m
-        dV = np.dot(other._invV, self._V)
+        dm = self.m - other.m
+        dV = np.dot(other.invV, self.V)
         err = -np.log(force_tiny(np.linalg.det(dV)))
         err += np.sum(np.diag(dV)) - dm.size
-        err += np.dot(dm.T, np.dot(other._invV, dm))
+        err += np.dot(dm.T, np.dot(other.invV, dm))
         err = np.maximum(.5 * err, 0.0)
         z_err = np.maximum(Z * np.log(Z / force_tiny(other_Z)) + other_Z - Z, 0.0)
         return Z * err + z_err
 
     def integral(self):
         Z = self.Z
-        m = self._m
+        m = self.m
         I1 = Z * m
         I2 = Z * (self.V
                   + np.dot(m.reshape((self._dim, 1)),
@@ -246,19 +278,10 @@ class Gaussian(object):
 
     def __str__(self):
         s = 'Gaussian distribution with parameters:\n'
-        s += str(self._K) + '\n'
-        s += str(self._m) + '\n'
-        s += str(self._V) + '\n'
+        s += str(self.K) + '\n'
+        s += str(self.m) + '\n'
+        s += str(self.V) + '\n'
         return s
-
-    def copy(self):
-        return self.__class__(self._m, self._V, K=self._K)
-
-    def normalize(self):
-        return self.__class__(self._m, self._V)
-
-    def rescale(self, c):
-        return self.__class__(self._m, self._V, K=c * self._K)
 
 
 class GaussianFamily(object):
@@ -293,26 +316,42 @@ class GaussianFamily(object):
         return isinstance(obj, Gaussian)
 
 
-class FactorGaussian(object):
+
+def moments_to_factor_theta(K, m, invv):
+    theta2 = -.5 * invv
+    theta1 = invv * m
+    theta0 = np.log(K) - .5 * np.dot(m, theta1)
+    return np.concatenate((np.array((theta0,)), theta1, theta2))
+
+    
+class FactorGaussian(Gaussian):
 
     def __init__(self, m=None, v=None, K=None, Z=None, theta=None):
-        self._family = 'factor_gaussian'
         if not theta is None:
             self._set_theta(theta)
+            self._dim = (len(self._theta) - 1) // 2
         else:
-            self._set_moments(m, v, K, Z)
+            m = np.asarray(m)
+            self._dim = m.size
+            m = np.reshape(m, (self._dim,))
+            v = np.reshape(np.asarray(v), (self._dim,))
+            self._fill_cache_from_moments(m, v, K, Z)
+            self._theta = moments_to_factor_theta(self._K, self._m, self._invv)
 
-    def _set_dimensions(self, dim):
-        self._dim = dim
-        self._theta_dim = 2 * dim + 1
+    def _init_cache(self):
+        self._K = None
+        self._Z = None
+        self._m = None
+        self._v = None
+        self._invv = None
+        self._detV = None
 
-    def _set_moments(self, m, v, K=None, Z=None):
+    def _fill_cache_from_moments(self, m, v, K=None, Z=None):
         m = np.asarray(m)
         dim = m.size
-        self._set_dimensions(dim)
         # Mean and variance
-        m = force_finite(np.reshape(m, (dim,)))
-        v = force_finite(np.reshape(v, (dim,)))
+        m = np.reshape(m, (dim,))
+        v = np.reshape(v, (dim,))
         self._dim = dim
         self._m = m
         self._v = force_tiny(v)
@@ -321,132 +360,85 @@ class FactorGaussian(object):
         # Normalization constant
         if not K is None:
             self._K = float(K)
-            self._Z = None
+            self._Z = K_to_Z(self._K, self._dim, self._detV)
         else:
             if Z is None:
                 Z = 1.0
             self._K = Z_to_K(Z, self._dim, self._detV)
             self._Z = Z
 
-    @property
-    def dim(self):
-        return self._dim
-
-    @property
-    def theta_dim(self):
-        return self._theta_dim
-
-    @property
-    def K(self):
-        return self._K
-
-    @property
-    def Z(self):
-        if not self._Z is None:
-            return self._Z
-        self._Z = K_to_Z(self._K, self._dim, self._detV)
-        return self._Z
-    
-    @property
-    def m(self):
-        return self._m
-
-    @property
-    def V(self):
-        return np.diag(self._v)
-
-    @property
-    def v(self):
-        return self._v
-
-    @property
-    def invV(self):
-        return np.diag(self._invv)
-
-    @property
-    def sqrtV(self):
-        return np.diag(np.sqrt(np.abs(self._v)))
-
-    def _get_theta(self):
-        invV = 1 / self._v
-        theta2 = -.5 * invV
-        theta1 = invV * self._m
-        theta0 = np.log(self._K) - .5 * np.dot(self._m, theta1)
-        return np.concatenate((np.array((theta0,)), theta1, theta2))
-
-    def _set_theta(self, theta):
-        theta = np.asarray(theta)
-        dim = (theta.size - 1) // 2
-        self._set_dimensions(dim)
+    def _fill_cache(self):
+        theta = self._theta
+        dim = self._dim
         invv = -2 * theta[(dim + 1):]
         self._invv = force_tiny(invv)
         self._v = 1 / self._invv
         self._m = self._v * theta[1:(dim + 1)]
         self._K = force_finite(force_tiny(np.exp(theta[0] + .5 * np.dot(self._m, self._invv * self._m))))
         self._detV = np.prod(self._v)
-        self._Z = None
-                
-    theta = property(_get_theta, _set_theta)
+        self._Z = K_to_Z(self._K, self._dim, self._detV)
 
-    def rescale(self, c):
-        self._K *= c
+    @property
+    def V(self):
+        if self._v is None:
+            self._fill_cache()
+        return np.diag(self._v)
+
+    @property
+    def v(self):
+        if self._v is None:
+            self._fill_cache()
+        return self._v
+
+    @property
+    def invV(self):
+        if self._invv is None:
+            self._fill_cache()
+        return np.diag(self._invv)
+
+    @property
+    def sqrtV(self):
+        if self._v is None:
+            self._fill_cache()
+        return np.diag(np.sqrt(np.abs(self._v)))
 
     def mahalanobis(self, xs):
         if xs.ndim == 1:
-            m = self._m
-            invv = self._invv
+            m = self.m
+            invv = self.invv
         else:
-            m = np.expand_dims(self._m, -1)
-            invv = np.expand_dims(self._invv, -1)
+            m = np.expand_dims(self.m, -1)
+            invv = np.expand_dims(self.invv, -1)
         return np.sum(invv * ((xs - m) ** 2), 0)
-
-    def log(self, xs):
-        return np.log(self._K) - .5 * self.mahalanobis(xs)
-
-    def __call__(self, xs, log=True):
-        """
-        Evaluate the Gaussian at specified points.
-        xs must have shape (dim, npts)
-        """
-        return self._K * np.exp(-.5 * self.mahalanobis(xs))
-
-    def random(self, ndraws=1):
-        xs = (np.sqrt(np.abs(self._v)) * \
-                  np.random.normal(size=(self._dim, ndraws)).T).T
-        return (self._m + xs.T).T  # preserves shape
-
-    def quad3(self, gamma2):
-        return _quad3(self._m, self.sqrtV, gamma2)
 
     def __str__(self):
         s = 'Factored Gaussian distribution with parameters:\n'
-        s += str(self._K) + '\n'
-        s += str(self._m) + '\n'
-        s += 'diag(' + str(self._v) + ')\n'
+        s += str(self.K) + '\n'
+        s += str(self.m) + '\n'
+        s += 'diag(' + str(self.v) + ')\n'
         return s
 
     def embed(self):
         """
         Return equivalent instance of the parent class
         """
-        return Gaussian(self._m, self.V, K=self._K)
+        return Gaussian(self.m, self.V, K=self.K)
 
-    def __mul__(self, other):
-        return self.__class__(theta=self.theta + other.theta)
-        
-    def __truediv__(self, other):
-        return self.__class__(theta=self.theta - other.theta)
-        
-    def __pow__(self, power):
-        return self.__class__(theta=power * self.theta)
+    def random(self, ndraws=1):
+        xs = (np.sqrt(np.abs(self.v)) * \
+              np.random.normal(size=(self._dim, ndraws)).T).T
+        return (self.m + xs.T).T  # preserves shape
+
+    def quad3(self, rule):
+        return _quad3(self.m, self.sqrtV, rule)
 
     def kl_div(self, other):
         other_Z = other.Z
         if np.isinf(other_Z):
             return np.inf
         Z = self.Z
-        dm = self._m - other._m
-        dv = other._invv * self._v 
+        dm = self.m - other.m
+        dv = other.invv * self.v 
         err = -np.log(force_tiny(np.prod(dv)))
         err += np.sum(dv) - dm.size
         err += np.dot(dm * other._invv, dm)
@@ -456,19 +448,10 @@ class FactorGaussian(object):
     
     def integral(self):
         Z = self.Z
-        m = self._m
+        m = self.m
         I1 = Z * m
         I2 = Z * (self._v + m ** 2)
         return np.concatenate((np.array((Z,)), I1, I2))
-
-    def copy(self):
-        return self.__class__(self._m, self._v, K=self._K)
-
-    def normalize(self):
-        return self.__class__(self._m, self._v)
-
-    def rescale(self, c):
-        return self.__class__(self._m, self._v, K=c * self._K)
 
     
 
@@ -498,24 +481,6 @@ class FactorGaussianFamily(object):
         return isinstance(obj, FactorGaussian)
 
 
-"""
-def as_normalized_gaussian(g):
-    if isinstance(g, Gaussian):
-        return Gaussian(g.m, g.V)
-    elif isinstance(g, FactorGaussian):
-        return FactorGaussian(g.m, g.v)
-    if len(g) == 2:
-        m, V = np.asarray(g[0]), np.asarray(g[1])
-    else:
-        raise ValueError('input not understood')
-    if V.ndim < 2:
-        G = FactorGaussian(m, V)
-    elif V.ndim == 2:
-        G = Gaussian(m, V)
-    else:
-        raise ValueError('input variance not understood')
-    return G
-"""
 
 def as_gaussian(g):
     if isinstance(g, Gaussian) or isinstance(g, FactorGaussian):
@@ -564,5 +529,4 @@ def laplace_approximation(m, u, g, h):
         raise ValueError('Full Gaussian Laplace not implemented yet')
     else:
         raise ValueError('unknown family')
-
 
