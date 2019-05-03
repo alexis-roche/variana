@@ -378,11 +378,9 @@ def minimizer(name, x, f, grad_f, hess_f=None,
                              stepsize=stepsize, adaptive=adaptive,
                              proj=proj)
 
-    if not bounds is None:
-        if name != 'lbfgs':
-            print('Warning: changing optimization method from %s to lbfgs...' % name)
-        name = 'lbfgs'
-
+    if not bounds is None and name != 'lbfgs':
+            raise NotImplementedError('%s optimization method does not accept constraints' % name)
+        
     return min_obj[name](x, f, grad_f, hess_f=hess_f,
                          maxiter=maxiter, tol=tol,
                          bounds=bounds, disp=disp)
