@@ -26,7 +26,6 @@ def lambdify_target(f, x):
     return lambda x: np.array([f(xi) for xi in x.T])
 
 
-
 class VariationalSampler(object):
 
     def __init__(self, target, cavity, rule='balanced', ndraws=None, reflect=False):
@@ -93,7 +92,7 @@ class VariationalSampler(object):
         self._log_fn -= self._logscale
     
     def fit(self, method='kullback', family='gaussian', global_fit=False,
-            minimizer='lbfgs', bounds=None,  tol=1e-5, maxiter=None):
+            minimizer='lbfgs', stdev_max=None,  tol=1e-5, maxiter=None):
         """
         Perform fitting.
 
@@ -103,10 +102,10 @@ class VariationalSampler(object):
           one of 'laplace', 'quick_laplace', 'moment' or 'kullback'.
         """
         if method == 'kullback':
-            self._fit = KullbackFit(self, family=family, global_fit=global_fit,
-                                    minimizer=minimizer, bounds=bounds, tol=tol, maxiter=maxiter)
+            self._fit = KullbackFit(self, family=family, stdev_max=stdev_max, global_fit=global_fit, 
+                                    minimizer=minimizer, tol=tol, maxiter=maxiter)
         elif method == 'moment':
-            self._fit = MomentFit(self, family=family, global_fit=global_fit)
+            self._fit = MomentFit(self, family=family, stdev_max=stdev_max, global_fit=global_fit)
         else:
             raise ValueError('unknown method')
         return self._fit.gaussian()
@@ -151,7 +150,7 @@ def laplace_approx(u, g, h, cavity, optimize=True):
 
 class MomentFit(object):
 
-    def __init__(self, sample, family='gaussian', global_fit=False):
+    def __init__(self, sample, family='gaussian', stdev_max=None, global_fit=False):
         """
         Importance weighted likelihood fitting method.
         """
@@ -160,6 +159,9 @@ class MomentFit(object):
         self._npts = sample._x.shape[1]
         self._family = instantiate_family(family, self._dim)
         self._global_fit = global_fit
+        self._stdev_max = stdev_max
+        if not stdev_max is None and 'family' == 'gaussian':
+            raise NotImplementedError('Second-order constraints not implemented for full Gaussian fitting.')
         
         # Pre-compute some stuff and cache it
         self._F = self._family.design_matrix(sample._x)
@@ -171,7 +173,10 @@ class MomentFit(object):
         self._integral = np.dot(self._F, self._sample._w * self._sample._fn)
         self._integral *= np.exp(self._sample._logscale)
         wq = self._family.from_integral(self._integral)
-        self._gaussian = wq
+        self._factor_fit = wq
+        if not self._stdev_max is None:
+            self._factor_fit.theta[(self._dim + 1):] = np.minimum(self._factor_fit.theta[(self._dim + 1):],\
+                                    -.5 * (self._stdev_max ** -2) - self._sample._cavity.theta[(self._dim + 1):])
         
     @property
     def theta(self):
@@ -179,15 +184,22 @@ class MomentFit(object):
 
     def gaussian(self):
         if self._global_fit:
-            return self._sample._cavity.Z * self._gaussian
+            return self._sample._cavity.Z * self._factor_fit
         else:
-            return self._gaussian / self._sample._cavity.normalize()
+            return self._factor_fit / self._sample._cavity.normalize()
+
+
+def make_bounds(stdev_max, dim, theta0):
+    theta_max = np.full(dim, -.5 * stdev_max ** -2) - theta0[(dim + 1):]
+    bounds = [(None, None) for i in range(dim + 1)]
+    bounds += [(None, theta_max[i]) for i in range(dim)]
+    return bounds
 
 
 class KullbackFit(object):
 
-    def __init__(self, sample, family='gaussian', global_fit=False,
-                 minimizer='lbfgs', bounds=None, tol=1e-5, maxiter=None):
+    def __init__(self, sample, family='gaussian', stdev_max=None, global_fit=False,
+                 minimizer='lbfgs', tol=1e-5, maxiter=None):
         """
         Sampling-based KL divergence minimization.
 
@@ -196,7 +208,7 @@ class KullbackFit(object):
         tol : float
           Tolerance on optimized parameter
 
-        maxiter : int
+        maxiter : None or int
           Maximum number of iterations in optimization
 
         minimizer : string
@@ -219,9 +231,11 @@ class KullbackFit(object):
         self._theta_init[0] = self._sample._logscale
 
         # Perform fit
-        self._minimizer = minimizer
-        self._bounds = bounds
-        self._tol = tol
+        self._minimizer = str(minimizer)
+        self._stdev_max = stdev_max
+        if not stdev_max is None and 'family' == 'gaussian':
+            raise NotImplementedError('Second-order constraints not implemented for full Gaussian fitting.')
+        self._tol = float(tol)
         self._maxiter = maxiter
         self._info = self._fit()
 
@@ -288,7 +302,7 @@ class KullbackFit(object):
         m = minimizer(meth, theta, self._loss, self._gradient,
                       hessian,
                       maxiter=self._maxiter, tol=self._tol,
-                      bounds=self._bounds)
+                      bounds=make_bounds(self._stdev_max, self._dim, self._sample._cavity.theta))
         self._theta = m.argmin()
         return m.info()
 

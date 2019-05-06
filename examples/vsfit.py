@@ -23,6 +23,12 @@ def _make_bounds(stdev_max, cavity):
     return bounds
 
 
+def check_bounds(stdev_max, theta, theta0):
+    dim = (len(theta) - 1) // 2
+    theta_max = np.full(dim, -.5 * stdev_max ** -2) - theta0[(dim + 1):]
+    return theta_max - theta[(dim + 1):]
+    
+
 def kl_fit(target, cavity, factorize=True, ndraws=None, global_fit=False, method='kullback', minimizer='lbfgs', stdev_max=None):
     vs = VariationalSampler(target, cavity, ndraws=ndraws)
     if factorize:
@@ -38,7 +44,7 @@ def kl_fit(target, cavity, factorize=True, ndraws=None, global_fit=False, method
     return vs.fit(family=family, global_fit=global_fit, method=method, minimizer=minimizer, bounds=bounds)
 
 
-"""
+""" 
 Tune the mean and variance of the cavity distribution. If we use
 as vector as the variance, it will be understood as a diagonal matrix.
 """
@@ -49,8 +55,13 @@ cavity = (m, v)
 #g = kl_fit(target, cavity, minimizer='lbfgs', stdev_max=1e2)
 
 vs = VariationalSampler(target, cavity)
-bounds = _make_bounds(1e2, vs._cavity)
-g = vs.fit(family='factor_gaussian', minimizer='lbfgs', bounds=bounds)
+#bounds = _make_bounds(1e2, vs._cavity)
+g = vs.fit(family='factor_gaussian', minimizer='lbfgs', stdev_max=1e2)
+
+# Test
+ok = check_bounds(1e2, g.theta, vs._cavity.theta)
+print(np.min(ok) >= 0)
+
 
 """
 Get the adjusted normalization constant, mean and variance.
