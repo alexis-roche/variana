@@ -1,5 +1,5 @@
 import numpy as np
-from variana.distfit import VariationalSampler
+from variana.dist_fit import VariationalSampler
 
 DIM = 10
 BETA = 2

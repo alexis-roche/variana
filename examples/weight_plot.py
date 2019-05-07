@@ -1,7 +1,7 @@
 import sys
 import numpy as np
 import pylab as pl
-from variana.maxent import GaussianCompositeInference
+from variana.dist_model import GaussianCompositeInference
 from sklearn.datasets import (load_iris,
                               load_digits,
                               load_breast_cancer,

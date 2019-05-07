@@ -1,7 +1,6 @@
 import sys
 
-from variana.maxent import GaussianCompositeInference, MininfLikelihood
-from variana.maxent import LogisticRegression
+from variana.dist_model import GaussianCompositeInference, MininfLikelihood, LogisticRegression
 
 from sklearn import datasets
 import numpy as np
