@@ -22,14 +22,14 @@ def reflect_sample(xs, m):
                       (xs.shape[0], 2 * xs.shape[1]))
 
 
-def lambdify_target(f, x):
+def vectorize(f, x):
     return lambda x: np.array([f(xi) for xi in x.T])
 
 
-class VariationalSampler(object):
+class VariationalSampling(object):
 
-    def __init__(self, target, cavity, rule='balanced', ndraws=None, reflect=False):
-        """Variational sampler class.
+    def __init__(self, log_factor, cavity, rule='balanced', ndraws=None, reflect=False):
+        """Variational sampling class.
 
         Fit a target factor with a Gaussian distribution by maximizing
         an approximate KL divergence based on Gaussian quadrature or
@@ -37,7 +37,7 @@ class VariationalSampler(object):
 
         Parameters
         ----------
-        target: callable
+        log_factor: callable
           returns the log of the target factor (utility)
 
         cavity: tuple
@@ -58,7 +58,7 @@ class VariationalSampler(object):
           One of 'balanced' or 'optimal_d4', 'exact_d3_uniform', 'exact_d3_positive'
         """
         self._cavity = as_gaussian(cavity)
-        self._target = target
+        self._log_factor = log_factor
         self._rule = rule
         self._ndraws = ndraws
         self._reflect = reflect
@@ -84,15 +84,15 @@ class VariationalSampler(object):
         # Compute fn, the vector of sampled factor values normalized
         # by the maximum factor value within the sample
         try:
-            self._log_fn = self._target(self._x)
+            self._log_fn = self._log_factor(self._x)
         except:
-            self._target = lambdify_target(self._target, self._x)
-            self._log_fn = self._target(self._x).squeeze()
+            self._log_factor = vectorize(self._log_factor, self._x)
+            self._log_fn = self._log_factor(self._x).squeeze()
         self._fn, self._logscale = safe_exp(self._log_fn)
         self._log_fn -= self._logscale
     
-    def fit(self, method='kullback', family='gaussian', global_fit=False,
-            minimizer='lbfgs', stdev_max=None,  tol=1e-5, maxiter=None):
+    def fit(self, method='kullback', family='factor_gaussian', global_fit=False,
+            minimizer='lbfgs', vmax=None,  tol=1e-5, maxiter=None):
         """
         Perform fitting.
 
@@ -102,10 +102,10 @@ class VariationalSampler(object):
           one of 'laplace', 'quick_laplace', 'moment' or 'kullback'.
         """
         if method == 'kullback':
-            self._fit = KullbackFit(self, family=family, stdev_max=stdev_max, global_fit=global_fit, 
+            self._fit = KullbackFit(self, family, vmax=vmax, global_fit=global_fit, 
                                     minimizer=minimizer, tol=tol, maxiter=maxiter)
         elif method == 'moment':
-            self._fit = MomentFit(self, family=family, stdev_max=stdev_max, global_fit=global_fit)
+            self._fit = MomentFit(self, family, vmax=vmax, global_fit=global_fit)
         else:
             raise ValueError('unknown method')
         return self._fit.gaussian()
@@ -118,7 +118,15 @@ class VariationalSampler(object):
     def w(self):
         return self._w
 
+    @property
+    def log_fx(self):
+        return self._log_fn + self._logscale
 
+    @property
+    def fx(self):
+        return np.exp(self._logscale) * self._fn
+    
+    
 def prod_factors(f):
     out = f[0]
     for i in range(1, len(f)):
@@ -150,7 +158,7 @@ def laplace_approx(u, g, h, cavity, optimize=True):
 
 class MomentFit(object):
 
-    def __init__(self, sample, family='gaussian', stdev_max=None, global_fit=False):
+    def __init__(self, sample, family, vmax=None, global_fit=False):
         """
         Importance weighted likelihood fitting method.
         """
@@ -159,8 +167,8 @@ class MomentFit(object):
         self._npts = sample._x.shape[1]
         self._family = instantiate_family(family, self._dim)
         self._global_fit = global_fit
-        self._stdev_max = stdev_max
-        if not stdev_max is None and 'family' == 'gaussian':
+        self._vmax = vmax
+        if not vmax is None and 'family' == 'gaussian':
             raise NotImplementedError('Second-order constraints not implemented for full Gaussian fitting.')
         
         # Pre-compute some stuff and cache it
@@ -174,9 +182,10 @@ class MomentFit(object):
         self._integral *= np.exp(self._sample._logscale)
         wq = self._family.from_integral(self._integral)
         self._factor_fit = wq
-        if not self._stdev_max is None:
-            self._factor_fit.theta[(self._dim + 1):] = np.minimum(self._factor_fit.theta[(self._dim + 1):],\
-                                    -.5 * (self._stdev_max ** -2) - self._sample._cavity.theta[(self._dim + 1):])
+        if not self._vmax is None:
+            self._factor_fit.theta[(self._dim + 1):] = \
+                                np.minimum(self._factor_fit.theta[(self._dim + 1):], \
+                                -.5 / self._vmax - self._sample._cavity.theta[(self._dim + 1):])
         
     @property
     def theta(self):
@@ -189,8 +198,8 @@ class MomentFit(object):
             return self._factor_fit / self._sample._cavity.normalize()
 
 
-def make_bounds(stdev_max, dim, theta0):
-    theta_max = np.full(dim, -.5 * stdev_max ** -2) - theta0[(dim + 1):]
+def make_bounds(vmax, dim, theta0):
+    theta_max = np.full(dim, -.5 / vmax) - theta0[(dim + 1):]
     bounds = [(None, None) for i in range(dim + 1)]
     bounds += [(None, theta_max[i]) for i in range(dim)]
     return bounds
@@ -198,7 +207,7 @@ def make_bounds(stdev_max, dim, theta0):
 
 class KullbackFit(object):
 
-    def __init__(self, sample, family='gaussian', stdev_max=None, global_fit=False,
+    def __init__(self, sample, family, vmax=None, global_fit=False,
                  minimizer='lbfgs', tol=1e-5, maxiter=None):
         """
         Sampling-based KL divergence minimization.
@@ -232,8 +241,8 @@ class KullbackFit(object):
 
         # Perform fit
         self._minimizer = str(minimizer)
-        self._stdev_max = stdev_max
-        if not stdev_max is None and 'family' == 'gaussian':
+        self._vmax = vmax
+        if not vmax is None and family == 'gaussian':
             raise NotImplementedError('Second-order constraints not implemented for full Gaussian fitting.')
         self._tol = float(tol)
         self._maxiter = maxiter
@@ -299,10 +308,14 @@ class KullbackFit(object):
             hessian = self._pseudo_hessian()
         else:
             hessian = self._hessian
+        if self._vmax is None:
+            bounds = None
+        else:
+            bounds = make_bounds(self._vmax, self._dim, self._sample._cavity.theta)
         m = minimizer(meth, theta, self._loss, self._gradient,
                       hessian,
                       maxiter=self._maxiter, tol=self._tol,
-                      bounds=make_bounds(self._stdev_max, self._dim, self._sample._cavity.theta))
+                      bounds=bounds)
         self._theta = m.argmin()
         return m.info()
 
@@ -316,3 +329,79 @@ class KullbackFit(object):
     def gaussian(self):
         return self._family.from_theta(self.theta)
 
+
+# Helper function
+def dist_fit(log_factor, cavity, factorize=True, ndraws=None, global_fit=False, method='kullback', minimizer='lbfgs', vmax=None):
+    vs = VariationalSampling(log_factor, cavity, ndraws=ndraws)
+    if factorize:
+        family = 'factor_gaussian'
+    else:
+        family = 'gaussian'
+    return vs.fit(family=family, global_fit=global_fit, method=method, minimizer=minimizer, vmax=vmax)
+
+
+
+# Iterative M-projection
+
+class Variana(object):
+
+    def __init__(self, target, dim, alpha, vmax, stride, m0=None, v0=None):
+        self._target = target
+        self._dim = int(dim)
+        self._alpha = float(alpha)
+        self._vmax = vmax
+        self._stride = int(stride)
+        if m0 is None:
+            m0 = np.zeros(self._dim)
+        if v0 is None:
+            v0 = self._vmax
+        self._fit = FactorGaussian(m=m0, v=np.full(self._dim, v0), K=np.exp(target(m0)))
+        aux = np.arange(self._dim // self._stride, dtype=int) * self._stride
+        self._slices = np.append(aux, self._dim)
+        
+    def update(self, i0, i1):
+        """
+        Improve the fit for slice(i0, i1) in the state space
+        """
+        # Auxiliary variables
+        s = slice(i0, i1)
+        s1 = slice(1 + i0, 1 + i1)
+        s2 = slice(1 + i0 + self._fit.dim, 1 + i1 + self._fit.dim)
+        loc_dim = i1 - i0
+
+        # Define local cavity from the current fit
+        loc_theta = np.concatenate((np.array((0,)), \
+                                    np.array(self._fit.theta[s1]), \
+                                    np.array(self._fit.theta[s2])))
+        init_loc_fit = FactorGaussian(theta=loc_theta)
+        log_gamma = self._alpha * (np.log(init_loc_fit.K) - np.log(self._fit.K))
+        
+        # Pick current fit center (will be modified in place)                
+        x = self._fit.m
+        self._fit.cleanup()
+
+        # Define log target
+        def log_factor(xa):
+            x[s] = xa
+            return self._alpha * self._target(x)
+
+        # Perform local fit by variational sampling 
+        vs = VariationalSampling(log_factor, init_loc_fit ** (1 - self._alpha))
+        if hasattr(self._vmax, '__getitem__'):
+            vmax = self._vmax[s]
+        else:
+            vmax = self._vmax
+        loc_fit = vs.fit(vmax=vmax, global_fit=True)
+
+        # Update overall fit
+        self._fit.set_theta(self._fit.theta[0] + loc_fit.theta[0] + log_gamma, indices=0)
+        self._fit.set_theta(loc_fit.theta[slice(1, 1 + loc_dim)], indices=s1)
+        self._fit.set_theta(loc_fit.theta[slice(1 + loc_dim, 1 + 2 * loc_dim)], indices=s2)
+
+    def run(self, niter):
+        for i in range(niter):
+            for j in range(len(self._slices) - 1):
+                self.update(self._slices[j], self._slices[j + 1])
+        return self._fit
+
+    

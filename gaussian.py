@@ -89,11 +89,13 @@ class Gaussian(object):
     g(x) = K exp[(x-m)'*A*(x-m)] with A = -.5*inv(V)
 
     theta_dim = (dim * (dim + 1)) / 2 + dim + 1
+
+    If theta is provided, ignore other parameters
     """
     def __init__(self, m=None, V=None, K=None, Z=None, theta=None):
-        # If theta is provided, ignore other parameters
+        self._init_cache()
         if not theta is None:
-            self._set_theta(theta)
+            self._theta = np.asarray(theta).squeeze()
             self._dim = _sample_dim(len(self._theta))
         else:
             m = np.asarray(m)
@@ -191,15 +193,16 @@ class Gaussian(object):
             self._fill_cache()
         return self._sqrtV
 
-    def _get_theta(self):
+    @property
+    def theta(self):
         return self._theta
     
-    def _set_theta(self, theta):
-        self._theta = np.asarray(theta).squeeze()
+    def set_theta(self, theta, indices=None):
+        if indices is None:
+            indices = slice(0, len(self._theta))
+        self._theta[indices] = np.asarray(theta).squeeze()
         self._init_cache()
       
-    theta = property(_get_theta, _set_theta)
-
     def mahalanobis(self, xs):
         if xs.ndim == 1:
             m = self.m
@@ -283,12 +286,15 @@ class Gaussian(object):
         s += str(self.V) + '\n'
         return s
 
+    def cleanup(self):
+        self._init_cache()
+
 
 class GaussianFamily(object):
 
     def __init__(self, dim):
-        self.dim = dim
-        self.theta_dim = (dim * (dim + 1)) / 2 + dim + 1
+        self._dim = dim
+        self._theta_dim = (dim * (dim + 1)) / 2 + dim + 1
 
     def design_matrix(self, pts):
         """
@@ -301,11 +307,11 @@ class GaussianFamily(object):
 
     def from_integral(self, integral):
         Z = integral[0]
-        m = integral[1: (self.dim + 1)] / Z
-        V = np.zeros((self.dim, self.dim))
-        idx = np.triu_indices(self.dim)
-        V[idx] = integral[(self.dim + 1):] / Z
-        V.T[np.triu_indices(self.dim)] = V[idx]
+        m = integral[1: (self._dim + 1)] / Z
+        V = np.zeros((self._dim, self._dim))
+        idx = np.triu_indices(self._dim)
+        V[idx] = integral[(self._dim + 1):] / Z
+        V.T[np.triu_indices(self._dim)] = V[idx]
         V -= np.dot(m.reshape(m.size, 1), m.reshape(1, m.size))
         return Gaussian(m, V, Z=Z)
 
@@ -315,7 +321,15 @@ class GaussianFamily(object):
     def check(self, obj):
         return isinstance(obj, Gaussian)
 
+    @property
+    def dim(self):
+        return self._dim
 
+    @property
+    def theta_dim(self):
+        return self._theta_dim
+    
+    
 
 def moments_to_factor_theta(K, m, invv):
     theta2 = -.5 * invv
@@ -327,8 +341,9 @@ def moments_to_factor_theta(K, m, invv):
 class FactorGaussian(Gaussian):
 
     def __init__(self, m=None, v=None, K=None, Z=None, theta=None):
+        self._init_cache()
         if not theta is None:
-            self._set_theta(theta)
+            self._theta = np.asarray(theta).squeeze()
             self._dim = (len(self._theta) - 1) // 2
         else:
             m = np.asarray(m)
@@ -389,6 +404,12 @@ class FactorGaussian(Gaussian):
         if self._v is None:
             self._fill_cache()
         return self._v
+
+    @property
+    def invv(self):
+        if self._invv is None:
+            self._fill_cache()
+        return self._invv
 
     @property
     def invV(self):
@@ -455,11 +476,11 @@ class FactorGaussian(Gaussian):
 
     
 
-class FactorGaussianFamily(object):
+class FactorGaussianFamily(GaussianFamily):
 
     def __init__(self, dim):
-        self.dim = dim
-        self.theta_dim = 2 * dim + 1
+        self._dim = dim
+        self._theta_dim = 2 * dim + 1
 
     def design_matrix(self, pts):
         """
@@ -470,8 +491,8 @@ class FactorGaussianFamily(object):
 
     def from_integral(self, integral):
         Z = integral[0]
-        m = integral[1: (self.dim + 1)] / Z
-        v = integral[(self.dim + 1):] / Z - m ** 2
+        m = integral[1: (self._dim + 1)] / Z
+        v = integral[(self._dim + 1):] / Z - m ** 2
         return FactorGaussian(m, v, Z=Z)
 
     def from_theta(self, theta):
@@ -479,7 +500,6 @@ class FactorGaussianFamily(object):
 
     def check(self, obj):
         return isinstance(obj, FactorGaussian)
-
 
 
 def as_gaussian(g):
