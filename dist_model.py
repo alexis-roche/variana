@@ -127,7 +127,7 @@ class Maxent(object):
             f = lambda param: -self.dual(param) + .5 * np.sum(self._damping * param ** 2)
             grad_f = lambda param: -self.gradient_dual(param) + self._damping * param
             hess_f = lambda param: -self.hessian_dual(param) + np.diag(self._damping)
-        m = minimizer(optimizer, self._param, f, grad_f, hess_f, bounds=self._bounds, tol=tol, maxiter=maxiter)
+        m = minimizer(f, self._param, optimizer, grad_f, hess_f, bounds=self._bounds, tol=tol, maxiter=maxiter)
         self._param = m.argmin()
         return m.info()
 
@@ -619,7 +619,7 @@ class MininfLikelihood(object):
             f = lambda param: -self.dual(param) + .5 * np.sum(self._damping * param ** 2)
             grad_f = lambda param: -self.gradient_dual(param) + self._damping * param
             hess_f = lambda param: -self.hessian_dual(param) + np.diag(self._damping)
-        m = minimizer(optimizer, self._param, f, grad_f, hess_f, bounds=self._bounds, tol=tol, maxiter=maxiter)
+        m = minimizer(f, self._param, optimizer, grad_f, hess_f, bounds=self._bounds, tol=tol, maxiter=maxiter)
         self._param = m.argmin()
         return m.info()
 

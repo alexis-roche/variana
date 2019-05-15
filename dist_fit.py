@@ -1,10 +1,15 @@
 """
 Variational sampling
+
+TODO:
+
+Convergence test in saw approximation
+Test iteration improvement in saw approximation (???)
 """
 import numpy as np
 from scipy.optimize import fmin_ncg
 
-from .utils import probe_time, minimizer
+from .utils import probe_time, minimizer, approx_gradient, approx_hessian, approx_hessian_diag
 from .gaussian import instantiate_family, as_gaussian, Gaussian, FactorGaussian, laplace_approximation
 
 
@@ -90,8 +95,8 @@ class VariationalSampling(object):
         self._fn, self._logscale = safe_exp(self._log_fn)
         self._log_fn -= self._logscale
     
-    def fit(self, method='kullback', family='factor_gaussian', global_fit=False,
-            minimizer='lbfgs', vmax=None,  tol=1e-5, maxiter=None):
+    def fit(self, method='kullback', family='factor_gaussian', output_factor=False,
+            optimizer='lbfgs', vmax=None,  tol=1e-5, maxiter=None):
         """
         Perform fitting.
 
@@ -101,10 +106,10 @@ class VariationalSampling(object):
           one of 'laplace', 'quick_laplace', 'moment' or 'kullback'.
         """
         if method == 'kullback':
-            self._fit = KullbackFit(self, family, vmax=vmax, global_fit=global_fit, 
-                                    minimizer=minimizer, tol=tol, maxiter=maxiter)
+            self._fit = KullbackFit(self, family, vmax=vmax, output_factor=output_factor, 
+                                    optimizer=optimizer, tol=tol, maxiter=maxiter)
         elif method == 'moment':
-            self._fit = MomentFit(self, family, vmax=vmax, global_fit=global_fit)
+            self._fit = MomentFit(self, family, vmax=vmax, output_factor=output_factor)
         else:
             raise ValueError('unknown method')
         return self._fit.gaussian()
@@ -157,7 +162,7 @@ def laplace_approx(u, g, h, cavity, optimize=True):
 
 class MomentFit(object):
 
-    def __init__(self, sample, family, vmax=None, global_fit=False):
+    def __init__(self, sample, family, vmax=None, output_factor=False):
         """
         Importance weighted likelihood fitting method.
         """
@@ -165,7 +170,7 @@ class MomentFit(object):
         self._dim = sample._x.shape[0]
         self._npts = sample._x.shape[1]
         self._family = instantiate_family(family, self._dim)
-        self._global_fit = global_fit
+        self._output_factor = output_factor
         self._vmax = vmax
         if not vmax is None and 'family' == 'gaussian':
             raise NotImplementedError('Second-order constraints not implemented for full Gaussian fitting.')
@@ -191,7 +196,7 @@ class MomentFit(object):
         return self.gaussian().theta
 
     def gaussian(self):
-        if self._global_fit:
+        if not self._output_factor:
             return self._sample._cavity.Z * self._factor_fit
         else:
             return self._factor_fit / self._sample._cavity.normalize()
@@ -206,8 +211,8 @@ def make_bounds(vmax, dim, theta0):
 
 class KullbackFit(object):
 
-    def __init__(self, sample, family, vmax=None, global_fit=False,
-                 minimizer='lbfgs', tol=1e-5, maxiter=None):
+    def __init__(self, sample, family, vmax=None, output_factor=False,
+                 optimizer='lbfgs', tol=1e-5, maxiter=None):
         """
         Sampling-based KL divergence minimization.
 
@@ -219,14 +224,14 @@ class KullbackFit(object):
         maxiter : None or int
           Maximum number of iterations in optimization
 
-        minimizer : string
+        optimizer : string
           One of 'newton', 'steepest', 'conjugate'
         """
         self._sample = sample
         self._dim = sample._x.shape[0]
         self._npts = sample._x.shape[1]
         self._family = instantiate_family(family, self._dim)
-        self._global_fit = global_fit
+        self._output_factor = output_factor
 
         # Pre-compute some stuff and cache it
         self._theta = None
@@ -239,7 +244,7 @@ class KullbackFit(object):
         self._theta_init[0] = self._sample._logscale
 
         # Perform fit
-        self._minimizer = str(minimizer)
+        self._optimizer = str(optimizer)
         self._vmax = vmax
         if not vmax is None and family == 'gaussian':
             raise NotImplementedError('Second-order constraints not implemented for full Gaussian fitting.')
@@ -251,7 +256,7 @@ class KullbackFit(object):
         """
         Compute fit
         """
-        if not self._minimizer in ('lbfgs',):
+        if not self._optimizer in ('lbfgs',):
             if theta is self._theta:
                 return True
         self._log_gn = np.dot(self._F.T, theta) - self._sample._logscale
@@ -302,8 +307,7 @@ class KullbackFit(object):
         Perform Gaussian approximation.
         """
         theta = self._theta_init
-        meth = self._minimizer
-        if meth == 'steepest':
+        if self._optimizer == 'steepest':
             hessian = self._pseudo_hessian()
         else:
             hessian = self._hessian
@@ -311,8 +315,8 @@ class KullbackFit(object):
             bounds = None
         else:
             bounds = make_bounds(self._vmax, self._dim, self._sample._cavity.theta)
-        m = minimizer(meth, theta, self._loss, self._gradient,
-                      hessian,
+        m = minimizer(self._loss, theta, self._optimizer,
+                      self._gradient, hessian,
                       maxiter=self._maxiter, tol=self._tol,
                       bounds=bounds)
         self._theta = m.argmin()
@@ -320,7 +324,7 @@ class KullbackFit(object):
 
     @property
     def theta(self):
-        if self._global_fit:
+        if not self._output_factor:
             return self._sample._cavity.theta + self._theta 
         else:
             return self._theta
@@ -330,35 +334,32 @@ class KullbackFit(object):
 
 
 # Helper function
-def dist_fit(log_factor, cavity, factorize=True, ndraws=None, global_fit=False, method='kullback', minimizer='lbfgs', vmax=None):
+def dist_fit(log_factor, cavity, factorize=True, ndraws=None, output_factor=False, method='kullback', optimizer='lbfgs', vmax=None):
     vs = VariationalSampling(log_factor, cavity, ndraws=ndraws)
     if factorize:
         family = 'factor_gaussian'
     else:
         family = 'gaussian'
-    return vs.fit(family=family, global_fit=global_fit, method=method, minimizer=minimizer, vmax=vmax)
+    return vs.fit(family=family, output_factor=output_factor, method=method, optimizer=optimizer, vmax=vmax)
 
 
 
-# Iterative M-projection
+# Saw approximation (iterative M-projection)
 
-class Variana(object):
+class SawApproximation(object):
 
-    def __init__(self, target, dim, alpha, vmax, stride, m0=None, v0=None):
-        self._target = target
-        self._dim = int(dim)
+    def __init__(self, log_target, init_fit, alpha, vmax, stride=None):
+        self._log_target = log_target
+        self._fit = as_gaussian(init_fit)
         self._alpha = float(alpha)
         self._vmax = vmax
-        if stride > dim:
-            raise ValueError('stride (%d) should be less or equal to dim (%d)' % (stride, dim)) 
-        self._stride = int(stride)
-        if m0 is None:
-            m0 = np.zeros(self._dim)
-        if v0 is None:
-            v0 = self._vmax
-        self._fit = FactorGaussian(m=m0, v=np.full(self._dim, v0), K=np.exp(target(m0)))
-        aux = np.arange(self._dim // self._stride, dtype=int) * self._stride
-        self._slices = np.append(aux, self._dim)
+        dim = self._fit.dim
+        if stride is None:
+            stride = dim
+        else:
+            stride = min(stride, dim)
+        aux = np.arange(dim // stride, dtype=int) * stride
+        self._slices = np.append(aux, dim)
         
     def update(self, i0, i1):
         """
@@ -384,7 +385,7 @@ class Variana(object):
         # Define log target
         def log_factor(xa):
             x[s] = xa
-            return self._alpha * self._target(x)
+            return self._alpha * self._log_target(x)
 
         # Perform local fit by variational sampling 
         vs = VariationalSampling(log_factor, init_loc_fit ** (1 - self._alpha))
@@ -392,17 +393,53 @@ class Variana(object):
             vmax = self._vmax[s]
         else:
             vmax = self._vmax
-        loc_fit = vs.fit(vmax=vmax, global_fit=True)
+        loc_fit = vs.fit(vmax=vmax)
 
         # Update overall fit
         self._fit.set_theta(loc_fit.theta[0] + log_gamma, indices=0)
         self._fit.set_theta(loc_fit.theta[slice(1, 1 + loc_dim)], indices=s1)
         self._fit.set_theta(loc_fit.theta[slice(1 + loc_dim, 1 + 2 * loc_dim)], indices=s2)
 
-    def run(self, niter):
+    def fit(self, niter):
         for i in range(niter):
             for j in range(len(self._slices) - 1):
                 self.update(self._slices[j], self._slices[j + 1])
         return self._fit
 
+    
+# Laplace approximation object
+
+class LaplaceApproximation(object):
+
+    def __init__(self, log_target, x0=None, track_mode=False,
+                 grad=None, hess=None, hess_diag=None, epsilon=1e-5,
+                 optimizer='lbfgs', **args):
+        self._log_target = log_target
+        self._epsilon = float(epsilon)
+        if grad is None:
+            self._grad = lambda x: approx_gradient(log_target, x, self._epsilon)
+        else:
+            self._grad = grad
+        if hess is None:
+            self._hess = lambda x: approx_hessian(log_target, x, self._epsilon)
+        else:
+            self._hess = hess
+        if hess_diag is None:
+            self._hess_diag = lambda x: np.diag(self._hess(x))
+        else:
+            self._hess_diag = hess_diag
+        self._x0 = np.asarray(x0)
+        if track_mode:
+            loss = lambda x: -self._log_target(x)
+            grad = lambda x: -self._grad(x)
+            hess = lambda x: -self._hess(x)
+            m = minimizer(loss, self._x0, optimizer, grad, hess, **args)
+            self._x0 = m.argmin()
+        
+    def fit(self, family='factor_gaussian'):
+        if family == 'factor_gaussian':
+            hess = self._hess_diag
+        else:
+            hess = self._hess
+        return laplace_approximation(self._x0, self._log_target(self._x0), self._grad(self._x0), hess(self._x0))
     

@@ -14,10 +14,6 @@ def force_tiny(x):
     return np.maximum(x, TINY)
 
 
-def safe_log(x):
-    return np.log(force_tiny(x))
-
-
 def safe_inv(x):
     sign_x = 1 - 2 * (x < 0)
     aux = x.copy().astype(float)
@@ -39,8 +35,16 @@ def logK_to_logZ(logK, dim, logdetV):
 
 
 def invV_to_theta(invV):
-    A = -invV + .5 * np.diag(np.diagonal(invV))
+    A = -.5 * invV
     return A[np.triu_indices(A.shape[0])]
+
+
+def theta_to_invV(theta):
+    dim = int(-1 + np.sqrt(1 + 8 * len(theta))) // 2
+    A = np.zeros([dim, dim])
+    A[np.triu_indices(dim)] = -2 * theta
+    A[np.tril_indices(dim, -1)] = A[np.triu_indices(dim, 1)]
+    return A
 
 
 def moments_to_theta(logK, m, invV):
@@ -50,15 +54,12 @@ def moments_to_theta(logK, m, invV):
     return np.concatenate((np.array((theta0,)), theta1, theta2))
 
 
-def theta_to_invV(theta):
-    dim = int(-1 + np.sqrt(1 + 8 * theta.size)) / 2
-    A = np.zeros([dim, dim])
-    A[np.triu_indices(dim)] = theta
-    return -(A + A.T)
-
-
-def _sample_dim(dim):
+def sample_dim(dim):
     return int(-1.5 + np.sqrt(.25 + 2 * dim))
+
+
+def theta_dim(dim):
+    return (dim * (dim + 1)) // 2 + dim + 1
 
 
 def silver_section(dim):
@@ -66,7 +67,7 @@ def silver_section(dim):
     return np.exp(- .5 * norm.ppf(aux) ** 2) / (np.sqrt(2 * np.pi) * (1 - aux))
 
 
-def _quad3(m, sqrtV, rule):
+def quad3(m, sqrtV, rule):
     """
     Return point and weight arrays with respective shapes (dim, 2*dim+1) and (2*dim+1,)
     """
@@ -99,6 +100,11 @@ def _quad3(m, sqrtV, rule):
     return xs, ws
 
 
+def safe_log(x):
+    return np.log(force_tiny(x))
+
+
+
 class Gaussian(object):
     """
     A class to describe unnormalized Gaussian distributions under the
@@ -110,29 +116,29 @@ class Gaussian(object):
 
     If theta is provided, ignore other parameters
     """
-    def __init__(self, m=None, V=None, K=None, Z=None, theta=None):
+    def __init__(self, m=None, V=None, logK=None, logZ=None, theta=None):
         self._init_cache()
         if not theta is None:
             self._theta = np.asarray(theta).squeeze()
-            self._dim = _sample_dim(len(self._theta))
+            self._dim = sample_dim(len(self._theta))
         else:
             m = np.asarray(m)
             self._dim = m.size
             m = np.reshape(m, (self._dim,))
             V = np.reshape(np.asarray(V), (self._dim, self._dim))
-            self._fill_cache_from_moments(m, V, K, Z)
+            self._fill_cache_from_moments(m, V, logK, logZ)
             self._theta = moments_to_theta(self._logK, self._m, self._invV)
 
     def _init_cache(self):
-        self._K = None
-        self._Z = None
+        self._logK = None
+        self._logZ = None
         self._m = None
         self._V = None
         self._invV = None
         self._logdetV = None
         self._sqrtV = None
 
-    def _fill_cache_from_moments(self, m, V, K=None, Z=None):
+    def _fill_cache_from_moments(self, m, V, logK=None, logZ=None):
         # Mean and variance
         self._m = m
         self._V = V
@@ -145,18 +151,18 @@ class Gaussian(object):
         self._logdetV = np.sum(np.log(v))
         self._sqrtV = np.dot(np.dot(P, np.diag(np.abs(v) ** .5)), P.T)
         # Normalization constant
-        if not K is None:
-            self._logK = safe_log(K)
+        if not logK is None:
+            self._logK = logK
             self._logZ = logK_to_logZ(self._logK, self._dim, self._logdetV)
         else:
-            if Z is None:
-                Z = 1.0
-            self._logZ = safe_log(Z)
+            if logZ is None:
+                logZ = 0.0
+            self._logZ = logZ
             self._logK = logZ_to_logK(self._logZ, self._dim, self._logdetV)
 
     def _fill_cache(self):
         """
-        Convert theta to K, m, V
+        Convert theta to logK, m, V
         """
         self._invV = theta_to_invV(self._theta[(self._dim + 1):])
         invv, P = np.linalg.eigh(self._invV)
@@ -235,14 +241,15 @@ class Gaussian(object):
         return np.sum(ys * np.dot(self.invV, ys), 0)
 
     def log(self, xs):
-        return np.log(self.K) - .5 * self.mahalanobis(xs)
+        return self.logK - .5 * self.mahalanobis(xs)
 
     def __call__(self, xs):
         """
         Evaluate the Gaussian at specified points.
         xs must have shape (dim, npts)
         """
-        return self.K * np.exp(-.5 * self.mahalanobis(xs))
+        ###return self.K * np.exp(-.5 * self.mahalanobis(xs))
+        return np.exp(self.log())
 
     def copy(self):
         return self.__class__(theta=self._theta)
@@ -272,7 +279,7 @@ class Gaussian(object):
         return (self.m + xs.T).T  # preserves shape
 
     def quad3(self, rule):
-        return _quad3(self.m, self.sqrtV, rule)
+        return quad3(self.m, self.sqrtV, rule)
 
     def kl_div(self, other):
         """
@@ -298,15 +305,14 @@ class Gaussian(object):
         I1 = Z * m
         I2 = Z * (self.V
                   + np.dot(m.reshape((self._dim, 1)),
-                           m.reshape((1, self._dim))))[\
-            np.triu_indices(self._dim)]
+                    m.reshape((1, self._dim))))[np.triu_indices(self._dim)]
         return np.concatenate((np.array((Z,)), I1, I2))
 
     def __str__(self):
         s = 'Gaussian distribution with parameters:\n'
-        s += str(self.K) + '\n'
-        s += str(self.m) + '\n'
-        s += str(self.V) + '\n'
+        s += 'K = %f\n' % self.K
+        s += 'm = %s\n' % self.m
+        s += 'V = %s\n' % self.V
         return s
 
     def cleanup(self):
@@ -352,7 +358,10 @@ class GaussianFamily(object):
     def theta_dim(self):
         return self._theta_dim
     
-    
+
+def factor_theta_dim(dim):
+    return 2 * dim + 1
+
 
 def moments_to_factor_theta(logK, m, invv):
     theta2 = -.5 * invv
@@ -363,7 +372,7 @@ def moments_to_factor_theta(logK, m, invv):
     
 class FactorGaussian(Gaussian):
 
-    def __init__(self, m=None, v=None, K=None, Z=None, theta=None):
+    def __init__(self, m=None, v=None, logK=None, logZ=None, theta=None):
         self._init_cache()
         if not theta is None:
             self._theta = np.asarray(theta).squeeze()
@@ -373,7 +382,7 @@ class FactorGaussian(Gaussian):
             self._dim = m.size
             m = np.reshape(m, (self._dim,))
             v = np.reshape(np.asarray(v), (self._dim,))
-            self._fill_cache_from_moments(m, v, K, Z)
+            self._fill_cache_from_moments(m, v, logK, logZ)
             self._theta = moments_to_factor_theta(self._logK, self._m, self._invv)
 
     def _init_cache(self):
@@ -384,7 +393,7 @@ class FactorGaussian(Gaussian):
         self._invv = None
         self._logdetV = None
 
-    def _fill_cache_from_moments(self, m, v, K=None, Z=None):
+    def _fill_cache_from_moments(self, m, v, logK=None, logZ=None):
         m = np.asarray(m)
         dim = m.size
         # Mean and variance
@@ -396,13 +405,13 @@ class FactorGaussian(Gaussian):
         self._v = 1 / force_tiny(self._invv)
         self._logdetV = np.sum(np.log(self._v))
         # Normalization constant
-        if not K is None:
-            self._logK = safe_log(K)
+        if not logK is None:
+            self._logK = logK
             self._logZ = logK_to_logZ(self._logK, self._dim, self._logdetV)
         else:
-            if Z is None:
-                Z = 1.0
-            self._logZ = safe_log(Z)
+            if logZ is None:
+                logZ = 0.0
+            self._logZ = logZ
             self._logK = logZ_to_logK(self._logZ, self._dim, self._logdetV)
 
     def _fill_cache(self):
@@ -453,17 +462,17 @@ class FactorGaussian(Gaussian):
         return np.sum(invv * ((xs - m) ** 2), 0)
 
     def __str__(self):
-        s = 'Factored Gaussian distribution with parameters:\n'
-        s += str(self.K) + '\n'
-        s += str(self.m) + '\n'
-        s += 'diag(' + str(self.v) + ')\n'
+        s = 'Factor Gaussian distribution with parameters:\n'
+        s += 'K = %f\n' % self.K
+        s += 'm = %s\n' % self.m
+        s += 'diag(V) = %s\n' % self.v
         return s
-
+    
     def embed(self):
         """
         Return equivalent instance of the parent class
         """
-        return Gaussian(self.m, self.V, K=self.K)
+        return Gaussian(self.m, self.V, logK=self.logK)
 
     def random(self, ndraws=1):
         xs = (np.sqrt(np.abs(self.v)) * \
@@ -471,7 +480,7 @@ class FactorGaussian(Gaussian):
         return (self.m + xs.T).T  # preserves shape
 
     def quad3(self, rule):
-        return _quad3(self.m, self.sqrtV, rule)
+        return quad3(self.m, self.sqrtV, rule)
 
     def kl_div(self, other):
         other_Z = other.Z
@@ -558,15 +567,17 @@ def laplace_approximation(m, u, g, h):
     h: Hessian or Hessian diagonal of log function
     """
     dim = len(m)
-    theta = np.zeros(2 * dim + 1)
-    theta[1 + dim:] = .5 * h
-    aux = h * m
-    theta[1:1+dim] = g - aux
-    theta[0] = u - np.dot(g, m) + .5 * np.dot(m.T, aux)
     if h.shape == g.shape:
+        theta = np.zeros(factor_theta_dim(dim))
+        theta[(1 + dim):] = .5 * h  
+        aux = h * m
+        theta[1:(1 + dim)] = g - aux
+        theta[0] = u - np.dot(g, m) + .5 * np.dot(m.T, aux)
         return FactorGaussian(theta=theta)
-    elif h.shape[-2:] == (dim, dim):
-        raise ValueError('Full Gaussian Laplace not implemented yet')
     else:
-        raise ValueError('unknown family')
-
+        theta = np.zeros(theta_dim(dim))
+        theta[(1 + dim):] = .5 * h[np.triu_indices(dim)]
+        aux = np.dot(h, m)
+        theta[1:(1 + dim)] = g - aux
+        theta[0] = u - np.dot(g, m) + .5 * np.dot(m.T, aux)
+        return Gaussian(theta=theta)

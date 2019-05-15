@@ -27,7 +27,7 @@ def probe_time(func):
 
 class SteepestDescent(object):
 
-    def __init__(self, x, f, grad_f, hess_f=None,
+    def __init__(self, f, x, grad_f, hess_f=None,
                  args=(),
                  maxiter=None, tol=1e-5,
                  stepsize=1, adaptive=True,
@@ -191,7 +191,7 @@ class NewtonDescent(SteepestDescent):
 
 class ScipyCG(object):
 
-    def __init__(self, x, f, grad_f, hess_f=None, args=(),
+    def __init__(self, f, x, grad_f, hess_f=None, args=(),
                  maxiter=None, tol=1e-5, bounds=None, disp=False):
         self._x = np.asarray(x)
         self._f = f
@@ -313,14 +313,14 @@ def bounds_to_proj(bounds):
     return proj
 
 
-def minimizer(name, x, f, grad_f, hess_f=None,
+def minimizer(f, x, optimizer, grad_f, hess_f=None,
               args=(),
               maxiter=None, tol=1e-5,
               stepsize=1, adaptive=True,
               bounds=None,
               disp=False):
     """
-    name must be one of 'steepest', 'conjugate', 'newton', 'cg', 'ncg', 'bfgs', 'lbfgs'
+    optimizer must be one of 'steepest', 'conjugate', 'newton', 'cg', 'ncg', 'bfgs', 'lbfgs'
     """
     min_obj = {'steepest': SteepestDescent,
                'conjugate': ConjugateDescent,
@@ -330,9 +330,9 @@ def minimizer(name, x, f, grad_f, hess_f=None,
                'bfgs': ScipyBFGS,
                'lbfgs': ScipyLBFGS}
 
-    if name not in min_obj.keys():
-        raise ValueError('unknown minimizer')
-    local_meth = name in ('steepest', 'conjugate', 'newton')
+    if optimizer not in min_obj.keys():
+        raise ValueError('unknown optimizer')
+    local_meth = optimizer in ('steepest', 'conjugate', 'newton')
 
     if local_meth:
         proj = None
@@ -342,17 +342,17 @@ def minimizer(name, x, f, grad_f, hess_f=None,
             else:
                 proj = bounds_to_proj(bounds)
 
-        return min_obj[name](x, f, grad_f, hess_f=hess_f,
+        return min_obj[optimizer](f, x, grad_f, hess_f=hess_f,
                              maxiter=maxiter, tol=tol,
                              stepsize=stepsize, adaptive=adaptive,
                              proj=proj)
 
-    if not bounds is None and name != 'lbfgs':
-            raise NotImplementedError('%s optimization method does not accept constraints' % name)
+    if not bounds is None and optimizer != 'lbfgs':
+            raise NotImplementedError('%s optimization method does not accept constraints' % optimizer)
         
-    return min_obj[name](x, f, grad_f, hess_f=hess_f,
-                         maxiter=maxiter, tol=tol,
-                         bounds=bounds, disp=disp)
+    return min_obj[optimizer](f, x, grad_f, hess_f=hess_f,
+                              maxiter=maxiter, tol=tol,
+                              bounds=bounds, disp=disp)
 
 
 
@@ -375,15 +375,15 @@ def approx_gradient(f, x, epsilon, args=()):
     g: ndarray
       Function gradient at `x`
     """
-    npts = 1
     n = x.shape[0]
+    npts = 1
     if len(x.shape) > 1:
         npts = x.shape[1]
     g = np.zeros((n, npts))
     ei = np.zeros(n)
     for i in range(n):
         ei[i] = .5 * epsilon
-        g[i, :] = (f((x.T + ei).T, *args) - f((x.T - ei).T), *args) / epsilon
+        g[i, :] = (f((x.T + ei).T, *args) - f((x.T - ei).T, *args)) / epsilon
         ei[i] = 0
     return g.squeeze()
 
@@ -407,8 +407,8 @@ def approx_hessian_diag(f, x, epsilon, args=()):
     h: ndarray
       Diagonal of the Hessian at `x`
     """
-    npts = 1
     n = x.shape[0]
+    npts = 1
     if len(x.shape) > 1:
         npts = x.shape[1]
     h = np.zeros((n, npts))
@@ -440,8 +440,8 @@ def approx_hessian(f, x, epsilon, args=()):
     H: ndarray
       Hessian matrix at `x`
     """
-    npts = 1
     n = x.shape[0]
+    npts = 1
     if len(x.shape) > 1:
         npts = x.shape[1]
     H = np.zeros((n, n, npts))
@@ -450,7 +450,7 @@ def approx_hessian(f, x, epsilon, args=()):
         ei[i] = .5 * epsilon
         g1 = approx_gradient(f, (x.T + ei).T, epsilon, args=args)
         g2 = approx_gradient(f, (x.T - ei).T, epsilon, args=args)
-        H[i, ...] = (g1 - g2) / epsilon
+        H[i, ...] = np.reshape((g1 - g2) / epsilon, (n, npts))
         ei[i] = 0
     return H.squeeze()
 
