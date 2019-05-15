@@ -10,10 +10,6 @@ from scipy.linalg import cho_factor, cho_solve, eigh
 from scipy.optimize import fmin_cg, fmin_ncg, fmin_bfgs, fmin_l_bfgs_b
 
 
-TINY = 1e-10
-HUGE = 1e50
-
-
 def probe_time(func):
     def wrapper(x, *args, **kwargs):
         t0 = time()
@@ -27,33 +23,6 @@ def probe_time(func):
             return dt, res
     return wrapper
 
-
-def force_tiny(x):
-    return np.maximum(x, TINY)
-
-
-def force_finite(x):
-    return np.clip(x, -HUGE, HUGE)
-
-
-def hdot(x, A):
-    return np.dot(x, np.dot(A, x))
-
-
-def decomp_sym_matrix(A):
-    s, P = eigh(A)
-    sign_s = 2. * (s >= 0) - 1
-    abs_s = force_tiny(np.abs(s))
-    return abs_s, sign_s, P
-
-
-def inv_sym_matrix(A):
-    s, P = eigh(A)
-    return np.dot(P * (1 / force_tiny(s)), P.T)
-
-
-def norminf(x):
-    return np.max(np.abs(x))
 
 
 class SteepestDescent(object):

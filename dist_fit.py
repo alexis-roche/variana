@@ -4,8 +4,8 @@ Variational sampling
 import numpy as np
 from scipy.optimize import fmin_ncg
 
-from .utils import (probe_time, minimizer, inv_sym_matrix, HUGE, approx_gradient, approx_hessian_diag, approx_hessian)
-from .gaussian import (instantiate_family, as_gaussian, Gaussian, FactorGaussian, laplace_approximation)
+from .utils import probe_time, minimizer
+from .gaussian import instantiate_family, as_gaussian, Gaussian, FactorGaussian, laplace_approximation
 
 
 
@@ -18,8 +18,7 @@ def safe_exp(x):
 
 
 def reflect_sample(xs, m):
-    return np.reshape(np.array([xs.T, m - xs.T]).T,
-                      (xs.shape[0], 2 * xs.shape[1]))
+    return np.reshape(np.array([xs.T, m - xs.T]).T, (xs.shape[0], 2 * xs.shape[1]))
 
 
 def vectorize(f, x):
@@ -350,6 +349,8 @@ class Variana(object):
         self._dim = int(dim)
         self._alpha = float(alpha)
         self._vmax = vmax
+        if stride > dim:
+            raise ValueError('stride (%d) should be less or equal to dim (%d)' % (stride, dim)) 
         self._stride = int(stride)
         if m0 is None:
             m0 = np.zeros(self._dim)
@@ -370,12 +371,12 @@ class Variana(object):
         loc_dim = i1 - i0
 
         # Define local cavity from the current fit
-        loc_theta = np.concatenate((np.array((0,)), \
+        loc_theta = np.concatenate((np.array((self._fit.theta[0],)), \
                                     np.array(self._fit.theta[s1]), \
                                     np.array(self._fit.theta[s2])))
         init_loc_fit = FactorGaussian(theta=loc_theta)
-        log_gamma = self._alpha * (np.log(init_loc_fit.K) - np.log(self._fit.K))
-        
+        log_gamma = self._alpha * (init_loc_fit.logK - self._fit.logK)
+
         # Pick current fit center (will be modified in place)                
         x = self._fit.m
         self._fit.cleanup()
@@ -394,7 +395,7 @@ class Variana(object):
         loc_fit = vs.fit(vmax=vmax, global_fit=True)
 
         # Update overall fit
-        self._fit.set_theta(self._fit.theta[0] + loc_fit.theta[0] + log_gamma, indices=0)
+        self._fit.set_theta(loc_fit.theta[0] + log_gamma, indices=0)
         self._fit.set_theta(loc_fit.theta[slice(1, 1 + loc_dim)], indices=s1)
         self._fit.set_theta(loc_fit.theta[slice(1 + loc_dim, 1 + 2 * loc_dim)], indices=s2)
 

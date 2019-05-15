@@ -1,9 +1,9 @@
 import numpy as np
 from variana.dist_fit import VariationalSampling
 
-DIM = 1
+DIM = 10
 BETA = 2
-PROPER = True
+PROPER = False
 
 
 def toy_dist(x, c=None, K=1, beta=BETA, proper=PROPER):
@@ -27,9 +27,9 @@ v = np.ones(DIM)
 K = np.random.rand()
 ###c = np.random.rand(DIM)
 c = None
-target = lambda x: toy_dist(x, c, K=K)
+log_target = lambda x: toy_dist(x, c, K=K)
 
-vs = VariationalSampling(target, (m, v))
+vs = VariationalSampling(log_target, (m, v))
 g = vs.fit(vmax=1e6)
 #g = vs.fit(family='gaussian')
 print(g)
@@ -38,8 +38,4 @@ print(g)
 """
 print('Error on K = %f' % np.abs(1 - g.K))
 print('Error on m = %f' % np.max(np.abs(c - g.m)))
-
-from variana.gaussian import FactorGaussian
-vs2 = VariationalSampling(target, FactorGaussian(m, v, K=2))
-g2 = vs2.fit(vmax=1e6, global_fit=True)
 """

@@ -12,7 +12,7 @@ def toy_score(x, center=None, K=1, beta=2, proper=True):
 dim = 10
 vmax = 1e4
 alpha = 0.1
-beta = 1.2
+beta = 2
 stride = 3
 niter = 100
 
