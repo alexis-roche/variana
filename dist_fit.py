@@ -344,15 +344,16 @@ def dist_fit(log_factor, cavity, factorize=True, ndraws=None, output_factor=Fals
 
 
 
-# Saw approximation (iterative M-projection)
+# Bridge approximation (iterative M-projection)
 
-class SawApproximation(object):
+class BridgeApproximation(object):
 
-    def __init__(self, log_target, init_fit, alpha, vmax, stride=None):
+    def __init__(self, log_target, init_fit, alpha, vmax, learning_rate=1, stride=None):
         self._log_target = log_target
         self._fit = as_gaussian(init_fit)
         self._alpha = float(alpha)
         self._vmax = vmax
+        self._learning_rate = float(learning_rate)
         dim = self._fit.dim
         if stride is None:
             stride = dim
@@ -370,13 +371,18 @@ class SawApproximation(object):
         s1 = slice(1 + i0, 1 + i1)
         s2 = slice(1 + i0 + self._fit.dim, 1 + i1 + self._fit.dim)
         loc_dim = i1 - i0
+        full_dim = (i0 == 0) and (i1 == self._fit.dim)
 
         # Define local cavity from the current fit
-        loc_theta = np.concatenate((np.array((self._fit.theta[0],)), \
-                                    np.array(self._fit.theta[s1]), \
-                                    np.array(self._fit.theta[s2])))
-        init_loc_fit = FactorGaussian(theta=loc_theta)
-        log_gamma = self._alpha * (init_loc_fit.logK - self._fit.logK)
+        if full_dim:
+            loc_theta = self._fit.theta
+            init_loc_fit = self._fit
+        else:
+            loc_theta = np.concatenate((np.array((self._fit.theta[0],)), \
+                                        np.array(self._fit.theta[s1]), \
+                                        np.array(self._fit.theta[s2])))
+            init_loc_fit = FactorGaussian(theta=loc_theta)
+            log_gamma = self._alpha * (init_loc_fit.logK - self._fit.logK)
 
         # Pick current fit center (will be modified in place)                
         x = self._fit.m
@@ -396,9 +402,16 @@ class SawApproximation(object):
         loc_fit = vs.fit(vmax=vmax)
 
         # Update overall fit
-        self._fit.set_theta(loc_fit.theta[0] + log_gamma, indices=0)
-        self._fit.set_theta(loc_fit.theta[slice(1, 1 + loc_dim)], indices=s1)
-        self._fit.set_theta(loc_fit.theta[slice(1 + loc_dim, 1 + 2 * loc_dim)], indices=s2)
+        if self._learning_rate < 1:
+            loc_theta = (1 - self._learning_rate) * loc_theta + self._learning_rate * loc_fit.theta
+        else:
+            loc_theta = loc_fit.theta
+        if full_dim:
+            self._fit.set_theta(loc_theta)
+        else:
+            self._fit.set_theta(loc_theta[0] + self._learning_rate * log_gamma, indices=0)
+            self._fit.set_theta(loc_theta[slice(1, 1 + loc_dim)], indices=s1)
+            self._fit.set_theta(loc_theta[slice(1 + loc_dim, 1 + 2 * loc_dim)], indices=s2)
 
     def fit(self, niter):
         for i in range(niter):

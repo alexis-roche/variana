@@ -3,7 +3,7 @@ import sys
 import numpy as np
 from scipy.optimize import fmin_ncg, fmin_l_bfgs_b
 
-from variana.dist_fit import SawApproximation, LaplaceApproximation
+from variana.dist_fit import BridgeApproximation, LaplaceApproximation
 
 
 def logistic(x):
@@ -172,7 +172,7 @@ if len(sys.argv) > 1:
 target, features = load_data(dataset)
 
 # Classical logistic regression
-prior_var = 25
+prior_var = 1e4
 X = make_design(features)
 lr = LogisticRegression(target, X, prior_var)
 lr.fit()
@@ -181,17 +181,18 @@ lr.fit()
 l = LaplaceApproximation(lr.log_posterior, lr.weight, grad=lr.log_posterior_grad, hess=lr.log_posterior_hess)
 ql = l.fit()
 
-# Saw approximation
-alpha = 1e-1
+# Bridge approximation
+alpha = .5
+learning_rate = .1
 niter = 100
 log_target = lambda w: lr.log_posterior(w)
 stride = None
 start = (np.zeros(lr.X.shape[1]), np.full(lr.X.shape[1], prior_var))
-v = SawApproximation(log_target, start, alpha, prior_var, stride)
+v = BridgeApproximation(log_target, start, alpha, prior_var, learning_rate=learning_rate, stride=stride)
 q = v.fit(niter=niter)
 
 # Print out some stuff
 print('Laplace')
 print('Log-likelihood = %f, Peak = %f' % (lr.log_likelihood(ql.m), ql.logK))
-print('Saw')
+print('Bridge')
 print('Log-likelihood = %f, Peak = %f' % (lr.log_likelihood(q.m), q.logK))

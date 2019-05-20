@@ -1,5 +1,5 @@
 import numpy as np
-from variana.dist_fit import SawApproximation, LaplaceApproximation
+from variana.dist_fit import BridgeApproximation, LaplaceApproximation
 
 
 def toy_score(x, center=None, K=1, beta=2, proper=True):
@@ -12,6 +12,7 @@ def toy_score(x, center=None, K=1, beta=2, proper=True):
 dim = 10
 vmax = 1e4
 alpha = 0.1
+learning_rate = 1
 beta = 2
 stride = 3
 niter = 100
@@ -27,7 +28,8 @@ log_target = lambda x: toy_score(x, c, K, beta)
 l = LaplaceApproximation(log_target, np.zeros(dim))
 ql = l.fit()
 
-v = SawApproximation(log_target, (np.zeros(dim), np.full(dim, vmax)), alpha, vmax, stride)
+v = BridgeApproximation(log_target, (np.zeros(dim), np.full(dim, vmax)),
+                        alpha, vmax, learning_rate=learning_rate, stride=stride)
 q = v.fit(niter=niter)
 
 print('True K = %f' % K)
