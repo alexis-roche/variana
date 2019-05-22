@@ -522,7 +522,7 @@ class FactorGaussianFamily(GaussianFamily):
         Z = integral[0]
         m = integral[1: (self._dim + 1)] / Z
         v = integral[(self._dim + 1):] / Z - m ** 2
-        return FactorGaussian(m, v, Z=Z)
+        return FactorGaussian(m, v, logZ=safe_log(Z))
 
     def from_theta(self, theta):
         return FactorGaussian(theta=theta)

@@ -103,7 +103,7 @@ class VariationalSampling(object):
         Parameters
         ----------
         method: str
-          one of 'laplace', 'quick_laplace', 'moment' or 'kullback'.
+          'moment' or 'kullback'.
         """
         if method == 'kullback':
             self._fit = KullbackFit(self, family, vmax=vmax, output_factor=output_factor, 
@@ -179,28 +179,27 @@ class MomentFit(object):
         self._F = self._family.design_matrix(sample._x)
 
         # Perform fit
-        self._fit()
+        self._run()
 
-    def _fit(self):
+    def _run(self):
         self._integral = np.dot(self._F, self._sample._w * self._sample._fn)
         self._integral *= np.exp(self._sample._logscale)
-        wq = self._family.from_integral(self._integral)
-        self._factor_fit = wq
+        self._full_fit = self._family.from_integral(self._integral)
         if not self._vmax is None:
-            self._factor_fit.theta[(self._dim + 1):] = \
-                                np.minimum(self._factor_fit.theta[(self._dim + 1):], \
-                                -.5 / self._vmax - self._sample._cavity.theta[(self._dim + 1):])
+            self._full_fit.theta[(self._dim + 1):] = \
+                        np.minimum(self._full_fit.theta[(self._dim + 1):], \
+                        -.5 / self._vmax - self._sample._cavity.theta[(self._dim + 1):])
         
     @property
     def theta(self):
         return self.gaussian().theta
 
     def gaussian(self):
-        if not self._output_factor:
-            return self._sample._cavity.Z * self._factor_fit
+        if self._output_factor:
+            return self._full_fit / self._sample._cavity.normalize()
         else:
-            return self._factor_fit / self._sample._cavity.normalize()
-
+            return self._sample._cavity.Z * self._full_fit
+            
 
 def make_bounds(vmax, dim, theta0):
     theta_max = np.full(dim, -.5 / vmax) - theta0[(dim + 1):]
@@ -250,7 +249,7 @@ class KullbackFit(object):
             raise NotImplementedError('Second-order constraints not implemented for full Gaussian fitting.')
         self._tol = float(tol)
         self._maxiter = maxiter
-        self._info = self._fit()
+        self._info = self._run()
 
     def _update_fit(self, theta):
         """
@@ -302,7 +301,7 @@ class KullbackFit(object):
         """
         return np.dot(self._F * (self._sample._w * self._sample._fn), self._F.T)
 
-    def _fit(self):
+    def _run(self):
         """
         Perform Gaussian approximation.
         """
@@ -324,10 +323,10 @@ class KullbackFit(object):
 
     @property
     def theta(self):
-        if not self._output_factor:
-            return self._sample._cavity.theta + self._theta 
-        else:
+        if self._output_factor:
             return self._theta
+        else:
+            return self._sample._cavity.theta + self._theta 
 
     def gaussian(self):
         return self._family.from_theta(self.theta)
@@ -348,7 +347,7 @@ def dist_fit(log_factor, cavity, factorize=True, ndraws=None, output_factor=Fals
 
 class BridgeApproximation(object):
 
-    def __init__(self, log_target, init_fit, alpha, vmax, learning_rate=1, stride=None):
+    def __init__(self, log_target, init_fit, alpha, vmax, learning_rate=1, stride=None, method='kullback'):
         self._log_target = log_target
         self._fit = as_gaussian(init_fit)
         self._alpha = float(alpha)
@@ -361,6 +360,7 @@ class BridgeApproximation(object):
             stride = min(stride, dim)
         aux = np.arange(dim // stride, dtype=int) * stride
         self._slices = np.append(aux, dim)
+        self._method = str(method)
         
     def update(self, i0, i1):
         """
@@ -393,13 +393,17 @@ class BridgeApproximation(object):
             x[s] = xa
             return self._alpha * self._log_target(x)
 
-        # Perform local fit by variational sampling 
-        vs = VariationalSampling(log_factor, init_loc_fit ** (1 - self._alpha))
-        if hasattr(self._vmax, '__getitem__'):
-            vmax = self._vmax[s]
+        # Perform local fit by variational sampling
+        if self._method in ('kullback', 'moment'):
+            vs = VariationalSampling(log_factor, init_loc_fit ** (1 - self._alpha))
+            if hasattr(self._vmax, '__getitem__'):
+                vmax = self._vmax[s]
+            else:
+                vmax = self._vmax
+            loc_fit = vs.fit(vmax=vmax, method=self._method)
         else:
-            vmax = self._vmax
-        loc_fit = vs.fit(vmax=vmax)
+            la = LaplaceApproximation(log_factor, init_loc_fit.m)
+            loc_fit = (init_loc_fit ** (1 - self._alpha)) * la.fit()
 
         # Update overall fit
         if self._learning_rate < 1:
@@ -424,10 +428,11 @@ class BridgeApproximation(object):
 
 class LaplaceApproximation(object):
 
-    def __init__(self, log_target, x0=None, track_mode=False,
+    def __init__(self, log_target, x0, track_mode=False,
                  grad=None, hess=None, hess_diag=None, epsilon=1e-5,
                  optimizer='lbfgs', **args):
         self._log_target = log_target
+        self._x0 = np.asarray(x0)
         self._epsilon = float(epsilon)
         if grad is None:
             self._grad = lambda x: approx_gradient(log_target, x, self._epsilon)
@@ -438,10 +443,12 @@ class LaplaceApproximation(object):
         else:
             self._hess = hess
         if hess_diag is None:
-            self._hess_diag = lambda x: np.diag(self._hess(x))
+            if len(self._x0) == 1:
+                self._hess_diag = self._hess
+            else:
+                self._hess_diag = lambda x: np.diag(self._hess(x))
         else:
             self._hess_diag = hess_diag
-        self._x0 = np.asarray(x0)
         if track_mode:
             loss = lambda x: -self._log_target(x)
             grad = lambda x: -self._grad(x)
