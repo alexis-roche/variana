@@ -14,14 +14,6 @@ from .gaussian import instantiate_family, as_gaussian, Gaussian, FactorGaussian,
 
 
 
-def safe_exp(x):
-    """
-    Returns a tuple (exp(x-xmax), xmax).
-    """
-    xmax = x.max()
-    return np.exp(x - xmax), xmax
-
-
 def reflect_sample(xs, m):
     return np.reshape(np.array([xs.T, m - xs.T]).T, (xs.shape[0], 2 * xs.shape[1]))
 
@@ -85,18 +77,21 @@ class VariationalSampling(object):
                 self._x = reflect_sample(self._x, self._cavity.m)
             self._w = np.zeros(self._x.shape[1])
             self._w[:] = 1 / float(self._x.shape[1])
-        # Compute fn, the vector of sampled factor values normalized
-        # by the maximum factor value within the sample
+        # For numerical stability, we normalize the factor values by
+        # the maximum factor value within the sample, and keep track
+        # of the logarithm of that maximum value.
         try:
             self._log_fn = self._log_factor(self._x)
         except:
             self._log_factor = vectorize(self._log_factor, self._x)
             self._log_fn = self._log_factor(self._x).squeeze()
-        self._fn, self._logscale = safe_exp(self._log_fn)
-        self._log_fn -= self._logscale
+        self._log_fmax = self._log_fn.max()
+        self._log_fn -= self._log_fmax
+        self._fn = np.exp(self._log_fn)
     
-    def fit(self, method='kullback', family='factor_gaussian', output_factor=False,
-            optimizer='lbfgs', vmax=None,  tol=1e-5, maxiter=None):
+    def fit(self, method='kullback', family='factor_gaussian',
+            output_factor=False, vmax=None,
+            optimizer='lbfgs', tol=1e-5, maxiter=None):
         """
         Perform fitting.
 
@@ -104,6 +99,25 @@ class VariationalSampling(object):
         ----------
         method: str
           'moment' or 'kullback'.
+
+        family: str
+          'factor_gaussian' or 'gaussian'.
+
+        output_factor: bool
+          True if the factor approximation only is to be output.
+
+        vmax: None or float
+          If float, applies a maximum variance constraint to the fit.
+
+        optimizer: str
+          Only applicable to 'kullback' fitting method.
+
+        tol: float
+          Only applicable to 'kullback' fitting method.
+
+        maxiter: int
+          Only applicable to 'kullback' fitting method.
+        
         """
         if method == 'kullback':
             self._fit = KullbackFit(self, family, vmax=vmax, output_factor=output_factor, 
@@ -124,11 +138,11 @@ class VariationalSampling(object):
 
     @property
     def log_fx(self):
-        return self._log_fn + self._logscale
+        return self._log_fn + self._log_fmax
 
     @property
     def fx(self):
-        return np.exp(self._logscale) * self._fn
+        return np.exp(self._log_fmax) * self._fn
     
     
 def prod_factors(f):
@@ -183,7 +197,7 @@ class MomentFit(object):
 
     def _run(self):
         self._integral = np.dot(self._F, self._sample._w * self._sample._fn)
-        self._integral *= np.exp(self._sample._logscale)
+        self._integral *= np.exp(self._sample._log_fmax)
         self._full_fit = self._family.from_integral(self._integral)
         if not self._vmax is None:
             self._full_fit.theta[(self._dim + 1):] = \
@@ -240,7 +254,7 @@ class KullbackFit(object):
 
         # Initial parameter guess: fit the sampled point with largest probability
         self._theta_init = np.zeros(self._F.shape[0])
-        self._theta_init[0] = self._sample._logscale
+        self._theta_init[0] = self._sample._log_fmax
 
         # Perform fit
         self._optimizer = str(optimizer)
@@ -258,7 +272,7 @@ class KullbackFit(object):
         if not self._optimizer in ('lbfgs',):
             if theta is self._theta:
                 return True
-        self._log_gn = np.dot(self._F.T, theta) - self._sample._logscale
+        self._log_gn = np.dot(self._F.T, theta) - self._sample._log_fmax
         self._gn = np.exp(self._log_gn)
         self._theta = theta
         fail = np.isinf(self._log_gn).max() or np.isinf(self._gn).max()
@@ -268,12 +282,12 @@ class KullbackFit(object):
         """
         Compute the empirical divergence:
 
-          sum wn [pn * log pn/qn + qn - pn],
+          sum wn [fn * log fn/gn + fn - gn],
 
         where:
           wn are the weights
-          pn is the target factor
-          qn is the parametric fit
+          fn is the normalized target factor
+          gn is the normalized parametric fit
         """
         if not self._update_fit(theta):
             return np.inf
@@ -303,7 +317,18 @@ class KullbackFit(object):
 
     def _run(self):
         """
-        Perform Gaussian approximation.
+        Perform Gaussian approximation via discrete KL minimization.
+
+        This class relies on minimizing the KL divergence between the
+        **normalized** target factor (via division by its maximum) and
+        the consistently normalized parametric fit:
+
+        gn_theta = (1 / fmax) exp[theta' phi]
+
+        This is equal to the actual KL divergence divided by the
+        factor maximum, which is constant, therefore minimizing the
+        normalized KL divergence is equivalent to minimizing the
+        actual one.
         """
         theta = self._theta_init
         if self._optimizer == 'steepest':
@@ -339,7 +364,7 @@ def dist_fit(log_factor, cavity, factorize=True, ndraws=None, output_factor=Fals
         family = 'factor_gaussian'
     else:
         family = 'gaussian'
-    return vs.fit(family=family, output_factor=output_factor, method=method, optimizer=optimizer, vmax=vmax)
+    return vs.fit(family=family, output_factor=output_factor, method=method, vmax=vmax, optimizer=optimizer)
 
 
 
@@ -400,7 +425,7 @@ class BridgeApproximation(object):
                 vmax = self._vmax[s]
             else:
                 vmax = self._vmax
-            loc_fit = vs.fit(vmax=vmax, method=self._method)
+            loc_fit = vs.fit(method=self._method, vmax=vmax)
         else:
             la = LaplaceApproximation(log_factor, init_loc_fit.m)
             loc_fit = (init_loc_fit ** (1 - self._alpha)) * la.fit()
