@@ -465,7 +465,7 @@ class GaussianCompositeInference(MaxentClassifier):
         if not self._use_offset:
             return np.zeros(self._targets)
         if self._ref_class is None:
-            return np.concatenate(((0,), param[0:(self._targets - 1)]))
+            return np.append(0, param[0:(self._targets - 1)])
         out = np.zeros(self._targets)
         indexes = list(range(self._targets))
         indexes.pop(self._ref_class)
@@ -531,7 +531,7 @@ class LogisticRegression(MaxentClassifier):
             param = self._param
         if not self._use_offset:
             return np.zeros(self._targets)
-        return np.concatenate(((0,), param[0:(self._targets - 1)]))
+        return np.append(0, param[0:(self._targets - 1)])
 
     def _weight(self, param=None):
         if param is None:

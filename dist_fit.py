@@ -9,7 +9,7 @@ Test iteration improvement in saw approximation (???)
 import numpy as np
 from scipy.optimize import fmin_ncg
 
-from .utils import probe_time, minimizer, approx_gradient, approx_hessian, approx_hessian_diag
+from .utils import probe_time, is_sequence, minimizer, approx_gradient, approx_hessian, approx_hessian_diag
 from .gaussian import instantiate_family, as_gaussian, Gaussian, FactorGaussian, laplace_approximation
 
 
@@ -222,13 +222,6 @@ class MomentFit(object):
             return self._sample._cavity.Z * self._full_fit
             
 
-"""
-def make_bounds(vmax, dim, theta0):
-    theta_max = np.full(dim, -.5 / vmax) - theta0[(dim + 1):]
-    bounds = [(None, None) for i in range(dim + 1)]
-    bounds += [(None, theta_max[i]) for i in range(dim)]
-    return bounds
-"""
 
 def factor_theta2_max(vmax, cavity):
     return np.full(cavity.dim, -.5 / vmax) - cavity.theta[(cavity.dim + 1):]
@@ -353,7 +346,6 @@ class KullbackFit(object):
             theta2_max = factor_theta2_max(self._vmax, self._sample._cavity)
             bounds = [(None, None) for i in range(self._dim + 1)]
             bounds += [(None, theta2_max[i]) for i in range(self._dim)]
-            ###bounds = make_bounds(self._vmax, self._dim, self._sample._cavity.theta)
         m = minimizer(self._loss, theta, self._optimizer,
                       self._gradient, hessian,
                       maxiter=self._maxiter, tol=self._tol,
@@ -427,27 +419,28 @@ def dist_fit(log_factor, cavity, factorize=True, ndraws=None, output_factor=Fals
 
 class BridgeApproximation(object):
 
-    def __init__(self, log_target, init_fit, alpha, vmax, learning_rate=1, stride=None, method='kullback', **kwargs):
+    def __init__(self, log_target, init_fit, alpha, vmax, learning_rate=1, block_size=None, method='kullback'):
         self._log_target = log_target
         self._fit = as_gaussian(init_fit)
         self._alpha = float(alpha)
         self._vmax = vmax
         self._learning_rate = float(learning_rate)
-        dim = self._fit.dim
-        if stride is None:
-            stride = dim
+        if block_size is None:
+            self._slices = np.array((0, self._fit.dim))
+        elif is_sequence(block_size):
+            self._slices = np.append(0, np.cumsum(block_size))
         else:
-            stride = min(stride, dim)
-        aux = np.arange(dim // stride, dtype=int) * stride
-        self._slices = np.append(aux, dim)
+            stride = min(block_size, self._fit.dim)
+            self._slices = np.append(np.arange(self._fit.dim // stride, dtype=int) * stride,
+                                     self._fit.dim)
         self._method = str(method)
-        self._kwargs = kwargs
         
-    def update(self, i0, i1):
+    def update(self, block_idx, **kwargs):
         """
         Improve the fit for slice(i0, i1) in the state space
         """
         # Auxiliary variables
+        i0, i1 = self._slices[block_idx:(block_idx + 2)]
         s = slice(i0, i1)
         s1 = slice(1 + i0, 1 + i1)
         s2 = slice(1 + i0 + self._fit.dim, 1 + i1 + self._fit.dim)
@@ -477,11 +470,11 @@ class BridgeApproximation(object):
         # Perform local fit by variational sampling
         if self._method in ('kullback', 'moment'):
             vs = VariationalSampling(log_factor, init_loc_fit ** (1 - self._alpha))
-            if hasattr(self._vmax, '__getitem__'):
+            if is_sequence(self._vmax):
                 vmax = self._vmax[s]
             else:
                 vmax = self._vmax
-            loc_fit = vs.fit(method=self._method, vmax=vmax, **self._kwargs)
+            loc_fit = vs.fit(method=self._method, vmax=vmax, **kwargs)
         else:
             la = LaplaceApproximation(log_factor, init_loc_fit.m)
             loc_fit = (init_loc_fit ** (1 - self._alpha)) * la.fit()
@@ -498,10 +491,10 @@ class BridgeApproximation(object):
             self._fit.set_theta(loc_theta[slice(1, 1 + loc_dim)], indices=s1)
             self._fit.set_theta(loc_theta[slice(1 + loc_dim, 1 + 2 * loc_dim)], indices=s2)
 
-    def fit(self, niter):
+    def fit(self, niter, **kwargs):
         for i in range(niter):
             for j in range(len(self._slices) - 1):
-                self.update(self._slices[j], self._slices[j + 1])
+                self.update(j, **kwargs)
         return self._fit
 
     

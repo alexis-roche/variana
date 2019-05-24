@@ -475,3 +475,10 @@ def sdot(A, B):
 # This function returns the memory block address of an array.
 def aid(x):
     return x.__array_interface__['data'][0]
+
+
+
+def is_sequence(x):
+    return hasattr(x, '__len__')
+
+

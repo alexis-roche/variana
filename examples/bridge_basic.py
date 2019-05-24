@@ -9,12 +9,12 @@ def toy_score(x, center=None, K=1, beta=2, proper=True):
 
 
                
-dim = 200
+dim = 20
 vmax = 1e4
 alpha = 0.1
 learning_rate = 1
 beta = 2
-stride = 3
+block_size = (3, 4, 5, 8)
 niter = 100
 
 #K = 1
@@ -28,15 +28,13 @@ log_target = lambda x: toy_score(x, c, K, beta)
 l = LaplaceApproximation(log_target, np.zeros(dim))
 ql = l.fit()
 
+
 v = BridgeApproximation(log_target, (np.zeros(dim), np.full(dim, vmax)),
-                        alpha, vmax, learning_rate=learning_rate, stride=stride)
+                        alpha, vmax, learning_rate=learning_rate, block_size=block_size)
 q = v.fit(niter=niter)
 
 print('True K = %f' % K)
 print('Estimated K = %f' % q.K)
 print('Estimate / true = %f' % (q.K / K))
-
 print('Error on mean = %f' % np.max(np.abs(q.m - c)))
 ###print('Error on variance = %f' % np.max(np.abs(q.v - 1)))
-
-

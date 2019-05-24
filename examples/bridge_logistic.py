@@ -186,9 +186,9 @@ alpha = .5
 learning_rate = .1
 niter = 100
 log_target = lambda w: lr.log_posterior(w)
-stride = None
+block_size = None
 start = (np.zeros(lr.X.shape[1]), np.full(lr.X.shape[1], prior_var))
-v = BridgeApproximation(log_target, start, alpha, prior_var, learning_rate=learning_rate, stride=stride, method='laplace')
+v = BridgeApproximation(log_target, start, alpha, prior_var, learning_rate=learning_rate, block_size=block_size, method='laplace')
 q = v.fit(niter=niter)
 
 # Print out some stuff
