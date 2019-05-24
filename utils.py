@@ -2,8 +2,6 @@
 Constants used in several modules.
 Basic implementation of Gauss-Newton gradient descent scheme.
 """
-from ._utils import _sdot
-
 from time import time
 import numpy as np
 from scipy.linalg import cho_factor, cho_solve, eigh
@@ -470,6 +468,7 @@ class CachedFunction(object):
 
 
 def sdot(A, B):
+    from ._utils import _sdot
     return _sdot(A.astype(np.double), B.astype(np.double))
 
 
