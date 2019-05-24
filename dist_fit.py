@@ -91,14 +91,15 @@ class VariationalSampling(object):
     
     def fit(self, method='kullback', family='factor_gaussian',
             output_factor=False, vmax=None,
-            optimizer='lbfgs', tol=1e-5, maxiter=None):
+            optimizer='lbfgs', tol=1e-5, maxiter=None,
+            damping=1e-2):
         """
         Perform fitting.
 
         Parameters
         ----------
         method: str
-          'moment' or 'kullback'.
+          'moment', 'kullback' or 'onestep'.
 
         family: str
           'factor_gaussian' or 'gaussian'.
@@ -117,6 +118,9 @@ class VariationalSampling(object):
 
         maxiter: int
           Only applicable to 'kullback' fitting method.
+
+        damping: float
+          Only applicable to 'onestep' fitting method.
         
         """
         if method == 'kullback':
@@ -124,6 +128,9 @@ class VariationalSampling(object):
                                     optimizer=optimizer, tol=tol, maxiter=maxiter)
         elif method == 'moment':
             self._fit = MomentFit(self, family, vmax=vmax, output_factor=output_factor)
+        elif method == 'onestep':
+            self._fit = OnestepKullbackFit(self, family, vmax=vmax, output_factor=output_factor,
+                                           damping=damping)
         else:
             raise ValueError('unknown method')
         return self._fit.gaussian()
@@ -215,11 +222,16 @@ class MomentFit(object):
             return self._sample._cavity.Z * self._full_fit
             
 
+"""
 def make_bounds(vmax, dim, theta0):
     theta_max = np.full(dim, -.5 / vmax) - theta0[(dim + 1):]
     bounds = [(None, None) for i in range(dim + 1)]
     bounds += [(None, theta_max[i]) for i in range(dim)]
     return bounds
+"""
+
+def factor_theta2_max(vmax, cavity):
+    return np.full(cavity.dim, -.5 / vmax) - cavity.theta[(cavity.dim + 1):]
 
 
 class KullbackFit(object):
@@ -338,7 +350,10 @@ class KullbackFit(object):
         if self._vmax is None:
             bounds = None
         else:
-            bounds = make_bounds(self._vmax, self._dim, self._sample._cavity.theta)
+            theta2_max = factor_theta2_max(self._vmax, self._sample._cavity)
+            bounds = [(None, None) for i in range(self._dim + 1)]
+            bounds += [(None, theta2_max[i]) for i in range(self._dim)]
+            ###bounds = make_bounds(self._vmax, self._dim, self._sample._cavity.theta)
         m = minimizer(self._loss, theta, self._optimizer,
                       self._gradient, hessian,
                       maxiter=self._maxiter, tol=self._tol,
@@ -356,7 +371,47 @@ class KullbackFit(object):
     def gaussian(self):
         return self._family.from_theta(self.theta)
 
+    
 
+class OnestepKullbackFit(object):
+
+    def __init__(self, sample, family, vmax=None, output_factor=False,
+                 damping=1e-2):
+        self._sample = sample
+        self._dim = sample._x.shape[0]
+        self._npts = sample._x.shape[1]
+        self._family = instantiate_family(family, self._dim)
+        self._vmax = vmax
+        if not vmax is None and family == 'gaussian':
+            raise NotImplementedError('Second-order constraints not implemented for full Gaussian fitting.')
+        self._output_factor = output_factor
+        self._damping = float(damping)
+        self._theta = None
+        self._F = self._family.design_matrix(sample._x)
+        self._run()
+        
+    def _run(self):
+        cn = np.sum(self._sample._w * self._sample._fn)
+        theta = np.dot(self._F, self._sample._w * (self._sample._fn - cn))
+        theta *= (self._damping / cn) / np.sum(self._F ** 2 * self._sample._w, axis=1)
+        if not self._vmax is None:
+            theta[(self._dim + 1):] = np.minimum(theta[(self._dim + 1):], factor_theta2_max(self._vmax, self._sample._cavity))
+        theta[0] = np.log(cn) + self._sample._log_fmax
+        self._theta = theta
+
+    @property
+    def theta(self):
+        if self._output_factor:
+            return self._theta
+        else:
+            return self._sample._cavity.theta + self._theta 
+
+    def gaussian(self):
+        return self._family.from_theta(self.theta)
+
+
+        
+    
 # Helper function
 def dist_fit(log_factor, cavity, factorize=True, ndraws=None, output_factor=False, method='kullback', optimizer='lbfgs', vmax=None):
     vs = VariationalSampling(log_factor, cavity, ndraws=ndraws)
@@ -372,7 +427,7 @@ def dist_fit(log_factor, cavity, factorize=True, ndraws=None, output_factor=Fals
 
 class BridgeApproximation(object):
 
-    def __init__(self, log_target, init_fit, alpha, vmax, learning_rate=1, stride=None, method='kullback'):
+    def __init__(self, log_target, init_fit, alpha, vmax, learning_rate=1, stride=None, method='kullback', **kwargs):
         self._log_target = log_target
         self._fit = as_gaussian(init_fit)
         self._alpha = float(alpha)
@@ -386,6 +441,7 @@ class BridgeApproximation(object):
         aux = np.arange(dim // stride, dtype=int) * stride
         self._slices = np.append(aux, dim)
         self._method = str(method)
+        self._kwargs = kwargs
         
     def update(self, i0, i1):
         """
@@ -425,7 +481,7 @@ class BridgeApproximation(object):
                 vmax = self._vmax[s]
             else:
                 vmax = self._vmax
-            loc_fit = vs.fit(method=self._method, vmax=vmax)
+            loc_fit = vs.fit(method=self._method, vmax=vmax, **self._kwargs)
         else:
             la = LaplaceApproximation(log_factor, init_loc_fit.m)
             loc_fit = (init_loc_fit ** (1 - self._alpha)) * la.fit()

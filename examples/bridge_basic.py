@@ -9,7 +9,7 @@ def toy_score(x, center=None, K=1, beta=2, proper=True):
 
 
                
-dim = 10
+dim = 200
 vmax = 1e4
 alpha = 0.1
 learning_rate = 1
