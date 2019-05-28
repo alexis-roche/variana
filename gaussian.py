@@ -43,19 +43,13 @@ def theta_to_invV(theta):
     dim = int(-1 + np.sqrt(1 + 8 * len(theta))) // 2
     A = np.zeros([dim, dim])
     A[np.triu_indices(dim)] = -2 * theta
-    A[np.tril_indices(dim, -1)] = A[np.triu_indices(dim, 1)]
+    I, J = np.triu_indices(dim, 1)
+    A[J, I] = A[I, J]
     return A
 
 
-def moments_to_theta(logK, m, invV):
-    theta2 = invV_to_theta(invV)
-    theta1 = np.dot(invV, m)
-    theta0 = logK - .5 * np.dot(m, theta1)
-    return np.concatenate((np.array((theta0,)), theta1, theta2))
-
-
-def sample_dim(dim):
-    return int(-1.5 + np.sqrt(.25 + 2 * dim))
+def sample_dim(tdim):
+    return int(-1.5 + np.sqrt(.25 + 2 * tdim))
 
 
 def theta_dim(dim):
@@ -118,17 +112,20 @@ class Gaussian(object):
     """
     def __init__(self, m=None, V=None, logK=None, logZ=None, theta=None):
         self._init_cache()
-        if not theta is None:
-            self._theta = np.asarray(theta).squeeze()
-            self._dim = sample_dim(len(self._theta))
-        else:
+        if theta is None:
             m = np.asarray(m)
             self._dim = m.size
             m = np.reshape(m, (self._dim,))
             V = np.reshape(np.asarray(V), (self._dim, self._dim))
-            self._fill_cache_from_moments(m, V, logK, logZ)
-            self._theta = moments_to_theta(self._logK, self._m, self._invV)
-
+            self._fill_cache(m, V, logK, logZ)
+            theta2 = invV_to_theta(self._invV)
+            theta1 = np.dot(self._invV, self._m)
+            theta0 = self._logK - .5 * np.dot(self._m, theta1)
+            self._theta = np.concatenate((np.array((theta0,)), theta1, theta2))
+        else:
+            self._theta = np.asarray(theta).squeeze()
+            self._dim = sample_dim(len(self._theta))
+            
     def _init_cache(self):
         self._logK = None
         self._logZ = None
@@ -138,8 +135,11 @@ class Gaussian(object):
         self._logdetV = None
         self._sqrtV = None
 
-    def _fill_cache_from_moments(self, m, V, logK=None, logZ=None):
-        # Mean and variance
+    def _fill_cache(self, m, V, logK, logZ):
+        """
+        Compute auxiliary quantities: inverse, square root and determinant
+        of variance, normalizing constants.
+        """
         self._m = m
         self._V = V
         # Compute the inverse and the square root of the variance
@@ -150,7 +150,7 @@ class Gaussian(object):
         self._invV = np.dot(np.dot(P, np.diag(invv)), P.T)
         self._logdetV = np.sum(np.log(v))
         self._sqrtV = np.dot(np.dot(P, np.diag(np.abs(v) ** .5)), P.T)
-        # Normalization constant
+        ###
         if not logK is None:
             self._logK = logK
             self._logZ = logK_to_logZ(self._logK, self._dim, self._logdetV)
@@ -160,7 +160,7 @@ class Gaussian(object):
             self._logZ = logZ
             self._logK = logZ_to_logK(self._logZ, self._dim, self._logdetV)
 
-    def _fill_cache(self):
+    def _update_cache(self):
         """
         Convert theta to logK, m, V
         """
@@ -181,7 +181,7 @@ class Gaussian(object):
     @property
     def logK(self):
         if self._logK is None:
-            self._fill_cache()
+            self._update_cache()
         return self._logK
 
     @property
@@ -191,7 +191,7 @@ class Gaussian(object):
     @property
     def logZ(self):
         if self._logZ is None:
-            self._fill_cache()
+            self._update_cache()
         return self._logZ
 
     @property
@@ -201,25 +201,25 @@ class Gaussian(object):
     @property
     def m(self):
         if self._m is None:
-            self._fill_cache()
+            self._update_cache()
         return self._m
 
     @property
     def V(self):
         if self._V is None:
-            self._fill_cache()
+            self._update_cache()
         return self._V
 
     @property
     def invV(self):
         if self._invV is None:
-            self._fill_cache()
+            self._update_cache()
         return self._invV
 
     @property
     def sqrtV(self):
         if self._sqrtV is None:
-            self._fill_cache()
+            self._update_cache()
         return self._sqrtV
 
     @property
@@ -248,8 +248,7 @@ class Gaussian(object):
         Evaluate the Gaussian at specified points.
         xs must have shape (dim, npts)
         """
-        ###return self.K * np.exp(-.5 * self.mahalanobis(xs))
-        return np.exp(self.log())
+        return np.exp(self.log(xs))
 
     def copy(self):
         return self.__class__(theta=self._theta)
@@ -359,17 +358,7 @@ class GaussianFamily(object):
         return self._theta_dim
     
 
-def factor_theta_dim(dim):
-    return 2 * dim + 1
-
-
-def moments_to_factor_theta(logK, m, invv):
-    theta2 = -.5 * invv
-    theta1 = invv * m
-    theta0 = logK - .5 * np.dot(m, theta1)
-    return np.concatenate((np.array((theta0,)), theta1, theta2))
-
-    
+   
 class FactorGaussian(Gaussian):
 
     def __init__(self, m=None, v=None, logK=None, logZ=None, theta=None):
@@ -382,9 +371,14 @@ class FactorGaussian(Gaussian):
             self._dim = m.size
             m = np.reshape(m, (self._dim,))
             v = np.reshape(np.asarray(v), (self._dim,))
-            self._fill_cache_from_moments(m, v, logK, logZ)
-            self._theta = moments_to_factor_theta(self._logK, self._m, self._invv)
+            self._fill_cache(m, v, logK, logZ)
+            theta2 = -.5 * self._invv
+            theta1 = self._invv * self._m
+            theta0 = self._logK - .5 * np.dot(self._m, theta1)
+            self._theta = np.concatenate((np.array((theta0,)), theta1, theta2))
 
+
+            
     def _init_cache(self):
         self._logK = None
         self._logZ = None
@@ -393,10 +387,13 @@ class FactorGaussian(Gaussian):
         self._invv = None
         self._logdetV = None
 
-    def _fill_cache_from_moments(self, m, v, logK=None, logZ=None):
+    def _fill_cache(self, m, v, logK, logZ):
+        """
+        Compute auxiliary quantities: inverse, square root and determinant
+        of variance, normalizing constants.
+        """
         m = np.asarray(m)
         dim = m.size
-        # Mean and variance
         m = np.reshape(m, (dim,))
         v = np.reshape(v, (dim,))
         self._dim = dim
@@ -404,7 +401,6 @@ class FactorGaussian(Gaussian):
         self._invv = safe_inv(v)
         self._v = 1 / force_tiny(self._invv)
         self._logdetV = np.sum(np.log(self._v))
-        # Normalization constant
         if not logK is None:
             self._logK = logK
             self._logZ = logK_to_logZ(self._logK, self._dim, self._logdetV)
@@ -414,7 +410,7 @@ class FactorGaussian(Gaussian):
             self._logZ = logZ
             self._logK = logZ_to_logK(self._logZ, self._dim, self._logdetV)
 
-    def _fill_cache(self):
+    def _update_cache(self):
         self._invv = force_tiny(-2 * self._theta[(self._dim + 1):])
         self._v = 1 / self._invv
         self._m = self._v * self._theta[1:(self._dim + 1)]
@@ -425,31 +421,31 @@ class FactorGaussian(Gaussian):
     @property
     def V(self):
         if self._v is None:
-            self._fill_cache()
+            self._update_cache()
         return np.diag(self._v)
 
     @property
     def v(self):
         if self._v is None:
-            self._fill_cache()
+            self._update_cache()
         return self._v
 
     @property
     def invv(self):
         if self._invv is None:
-            self._fill_cache()
+            self._update_cache()
         return self._invv
 
     @property
     def invV(self):
         if self._invv is None:
-            self._fill_cache()
+            self._update_cache()
         return np.diag(self._invv)
 
     @property
     def sqrtV(self):
         if self._v is None:
-            self._fill_cache()
+            self._update_cache()
         return np.diag(np.sqrt(np.abs(self._v)))
 
     def mahalanobis(self, xs):
@@ -568,7 +564,7 @@ def laplace_approximation(m, u, g, h):
     """
     dim = len(m)
     if h.shape == g.shape:
-        theta = np.zeros(factor_theta_dim(dim))
+        theta = np.zeros(2 * dim + 1)
         theta[(1 + dim):] = .5 * h  
         aux = h * m
         theta[1:(1 + dim)] = g - aux
