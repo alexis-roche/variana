@@ -28,23 +28,23 @@ s = 1 + np.random.rand(DIM)
 
 kernel = FactorGaussian(np.zeros(DIM), np.ones(DIM))
 log_target = lambda x: toy_dist(x, c, s, K=K) - kernel.log(x)
-vs = VariationalSampling(log_target, kernel)
-q = vs.fit(vmax=1e6)
+vs = VariationalSampling(log_target, kernel, ndraws=10*DIM)
+q = vs.fit(vmax=1e6, optimizer='newton', hess_diag_approx=True)
 ###q = vs.fit(family='gaussian')
 print(q)
+
+print(vs._fit._info)
 
 rel_err = lambda x, y: np.max(np.abs(y - x)) / np.maximum(1, np.max(np.abs(x)))
 print('Order-0 error = %f' % rel_err(K, q.K))
 print('Order-1 error = %f' % rel_err(c, q.m))
 print('Order-2 error = %f' % rel_err(s ** 2, q.v))
 
-###log_zob = lambda x: toy_dist(x, c, s, K=K)
-###vs2 = VariationalSampling(log_zob, kernel)
-###q2 = vs2.fit(vmax=1e6, output_factor=True)
-vs2 = VariationalSampling(log_target, kernel, ndraws=100 * DIM)
-q2 = vs2.fit(vmax=1e6)
+q2 = vs.fit(vmax=1e6, optimizer='newton', hess_diag_approx=False)
 
 print(q2)
 print('Order-0 dev = %f' % rel_err(q2.K, q.K))
 print('Order-1 dev = %f' % rel_err(q2.m, q.m))
 print('Order-2 dev = %f' % rel_err(q2.v, q.v))
+
+print(vs._fit._info)

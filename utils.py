@@ -8,6 +8,9 @@ from scipy.linalg import cho_factor, cho_solve, eigh
 from scipy.optimize import fmin_cg, fmin_ncg, fmin_bfgs, fmin_l_bfgs_b
 
 
+TINY = 1e-100
+
+
 def probe_time(func):
     def wrapper(x, *args, **kwargs):
         t0 = time()
@@ -85,7 +88,7 @@ class SteepestDescent(object):
             x0 = self._x
             fval0 = self._fval
             dx = self.direction()
-            norm_dx = norminf(dx)
+            norm_dx = np.max(np.abs(dx))
 
             # Line search
             a = self._stepsize
@@ -285,28 +288,27 @@ class ScipyLBFGS(ScipyCG):
 def squash(x):
     aux = np.unique(x)
     if len(aux) == 1:
-        return float(aux)
+        return aux
     return x
 
 
 def bounds_to_proj(bounds):
+
     replace_none = lambda x, a: a if x is None else x   
     b0 = squash(np.array([replace_none(b[0], -np.inf) for b in bounds]))
     b1 = squash(np.array([replace_none(b[1], np.inf) for b in bounds]))
+    b0_is_inf = (np.max(b0) == -np.inf)
+    b1_is_inf = (np.min(b1) == np.inf)
 
-    if isinstance(b0, float):
-        if b0 == -np.inf:
-            if isinstance(b1, float):
-                if b1 == np.inf:
-                    proj = lambda x: x
+    if b0_is_inf:
+        if b1_is_inf:
+            proj = lambda x: x
         else:
             proj = lambda x: (x <= b1) * x
+    elif b1_is_inf:
+        proj = lambda x: (x >= b0) * x
     else:
-        if isinstance(b1, float):
-            if b1 == np.inf:
-                proj = lambda x: (x >= b0) * x
-        else:
-            proj = lambda x: (x >= b0) * (x <= b1) * x
+        proj = lambda x: (x >= b0) * (x <= b1) * x
 
     return proj
 

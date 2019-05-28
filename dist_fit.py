@@ -61,6 +61,7 @@ class VariationalSampling(object):
 
         # Sample random points
         self._sampling_time = self._sample()
+        self._fit = None
         
     @probe_time
     def _sample(self):
@@ -92,7 +93,7 @@ class VariationalSampling(object):
     def fit(self, method='kullback', family='factor_gaussian',
             output_factor=False, vmax=None,
             optimizer='lbfgs', tol=1e-5, maxiter=None,
-            damping=1e-2):
+            damping=1e-2, hess_diag_approx=False):
         """
         Perform fitting.
 
@@ -125,7 +126,8 @@ class VariationalSampling(object):
         """
         if method == 'kullback':
             self._fit = KullbackFit(self, family, vmax=vmax, output_factor=output_factor, 
-                                    optimizer=optimizer, tol=tol, maxiter=maxiter)
+                                    optimizer=optimizer, tol=tol, maxiter=maxiter,
+                                    hess_diag_approx=hess_diag_approx)
         elif method == 'moment':
             self._fit = MomentFit(self, family, vmax=vmax, output_factor=output_factor)
         elif method == 'onestep':
@@ -150,7 +152,8 @@ class VariationalSampling(object):
     @property
     def fx(self):
         return np.exp(self._log_fmax) * self._fn
-    
+
+
     
 def prod_factors(f):
     out = f[0]
@@ -230,7 +233,8 @@ def factor_theta2_max(vmax, cavity):
 class KullbackFit(object):
 
     def __init__(self, sample, family, vmax=None, output_factor=False,
-                 optimizer='lbfgs', tol=1e-5, maxiter=None):
+                 optimizer='lbfgs', tol=1e-5, maxiter=None,
+                 hess_diag_approx=False):
         """
         Sampling-based KL divergence minimization.
 
@@ -268,6 +272,7 @@ class KullbackFit(object):
             raise NotImplementedError('Second-order constraints not implemented for full Gaussian fitting.')
         self._tol = float(tol)
         self._maxiter = maxiter
+        self._hess_diag_approx = bool(hess_diag_approx)
         self._info = self._run()
 
     def _update_fit(self, theta):
@@ -313,6 +318,13 @@ class KullbackFit(object):
         self._update_fit(theta)
         return np.dot(self._F * (self._sample._w * self._gn), self._F.T)
 
+    def _hessian_diag(self, theta):
+        """
+        Compute the hessian of the loss.
+        """
+        self._update_fit(theta)
+        return np.diag(np.sum((self._sample._w * self._gn) * (self._F ** 2), axis=1))
+
     def _pseudo_hessian(self):
         """
         Approximate the Hessian at the minimum by substituting the
@@ -339,7 +351,10 @@ class KullbackFit(object):
         if self._optimizer == 'steepest':
             hessian = self._pseudo_hessian()
         else:
-            hessian = self._hessian
+            if self._hess_diag_approx:
+                hessian = self._hessian_diag
+            else:
+                hessian = self._hessian
         if self._vmax is None:
             bounds = None
         else:

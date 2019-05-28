@@ -1,9 +1,8 @@
 import numpy as np
 import scipy.optimize as spo
 
-from .utils import sdot, minimizer, probe_time
+from .utils import TINY, sdot, minimizer, probe_time
 
-TINY = 1e-100
 
 
 class MaxentCache(object):

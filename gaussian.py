@@ -5,8 +5,9 @@ A class to represent unnormalized Gaussian distributions.
 import numpy as np
 from scipy.stats import norm
  
+from .utils import TINY
 
-TINY = 1e-100
+
 GAUSS_CONSTANT = .5 * np.log(2 * np.pi)
 
 
