@@ -259,11 +259,14 @@ class Gaussian(object):
     def normalize(self):
         return (1 / self.Z) * self
 
+    def embed(self):
+        return self
+    
     def __mul__(self, other):
-        return self.__class__(theta=self._theta + other._theta)
+        return self.__class__(theta=self._theta + other.embed()._theta)
         
     def __truediv__(self, other):
-        return self.__class__(theta=self._theta - other._theta)
+        return self.__class__(theta=self._theta - other.embed()._theta)
         
     def __pow__(self, power):
         return self.__class__(theta=power * self._theta)
@@ -339,7 +342,7 @@ class GaussianFamily(object):
         V[idx] = integral[(self._dim + 1):] / Z
         V.T[np.triu_indices(self._dim)] = V[idx]
         V -= np.dot(m.reshape(m.size, 1), m.reshape(1, m.size))
-        return Gaussian(m, V, Z=Z)
+        return Gaussian(m, V, logZ=safe_log(Z))
 
     def from_theta(self, theta):
         return Gaussian(theta=theta)
@@ -464,10 +467,22 @@ class FactorGaussian(Gaussian):
     
     def embed(self):
         """
-        Return equivalent instance of the parent class
+        Return equivalent full Gaussian instance
         """
         return Gaussian(self.m, self.V, logK=self.logK)
 
+    def __mul__(self, other):
+        if isinstance(other, self.__class__):
+            return self.__class__(theta=self._theta + other._theta)
+        else:
+            return self.embed() * other
+        
+    def __truediv__(self, other):
+        if isinstance(other, self.__class__):
+            return self.__class__(theta=self._theta - other._theta)
+        else:
+            return self.embed() / other
+        
     def random(self, ndraws=1):
         xs = (np.sqrt(np.abs(self.v)) * \
               np.random.normal(size=(self._dim, ndraws)).T).T

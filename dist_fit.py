@@ -3,8 +3,8 @@ Variational sampling
 
 TODO:
 
-Convergence test in saw approximation
-Test iteration improvement in saw approximation (???)
+Convergence test in bridge approximation
+Test iteration improvement in bridge approximation (???)
 """
 import numpy as np
 from scipy.optimize import fmin_ncg
@@ -93,14 +93,14 @@ class VariationalSampling(object):
     def fit(self, method='kullback', family='factor_gaussian',
             output_factor=False, vmax=None,
             optimizer='lbfgs', tol=1e-5, maxiter=None,
-            damping=1e-2, hess_diag_approx=False):
+            hess_diag_approx=False, output_info=False):
         """
         Perform fitting.
 
         Parameters
         ----------
         method: str
-          'moment', 'kullback' or 'onestep'.
+          'moment' or 'kullback'.
 
         family: str
           'factor_gaussian' or 'gaussian'.
@@ -120,9 +120,6 @@ class VariationalSampling(object):
         maxiter: int
           Only applicable to 'kullback' fitting method.
 
-        damping: float
-          Only applicable to 'onestep' fitting method.
-
         hess_diag_approx: bool
           Only applicable to 'newton' optimizer.        
         """
@@ -132,12 +129,20 @@ class VariationalSampling(object):
                                     hess_diag_approx=hess_diag_approx)
         elif method == 'moment':
             self._fit = MomentFit(self, family, vmax=vmax, output_factor=output_factor)
-        elif method == 'onestep':
-            self._fit = OnestepKullbackFit(self, family, vmax=vmax, output_factor=output_factor,
-                                           damping=damping)
         else:
             raise ValueError('unknown method')
-        return self._fit.gaussian()
+
+        print('DEBUG')
+        print(type(self._fit))
+
+        gauss = self._fit.gaussian()
+        if output_info:
+            if method == 'kullback':
+                return gauss, self._fit._info
+            else:
+                return gauss, None
+        else:
+            return gauss
         
     @property
     def x(self):
@@ -216,10 +221,6 @@ class MomentFit(object):
                         np.minimum(self._full_fit.theta[(self._dim + 1):], \
                         -.5 / self._vmax - self._sample._cavity.theta[(self._dim + 1):])
         
-    @property
-    def theta(self):
-        return self.gaussian().theta
-
     def gaussian(self):
         if self._output_factor:
             return self._full_fit / self._sample._cavity.normalize()
@@ -258,14 +259,9 @@ class KullbackFit(object):
         self._output_factor = output_factor
 
         # Pre-compute some stuff and cache it
-        self._theta = None
         self._F = self._family.design_matrix(sample._x)
         self._gn = None
         self._log_gn = None
-
-        # Initial parameter guess: fit the sampled point with largest probability
-        self._theta_init = np.zeros(self._F.shape[0])
-        self._theta_init[0] = self._sample._log_fmax
 
         # Perform fit
         self._optimizer = str(optimizer)
@@ -349,7 +345,6 @@ class KullbackFit(object):
         normalized KL divergence is equivalent to minimizing the
         actual one.
         """
-        theta = self._theta_init
         if self._optimizer == 'steepest':
             hessian = self._pseudo_hessian()
         else:
@@ -363,63 +358,26 @@ class KullbackFit(object):
             theta2_max = factor_theta2_max(self._vmax, self._sample._cavity)
             bounds = [(None, None) for i in range(self._dim + 1)]
             bounds += [(None, theta2_max[i]) for i in range(self._dim)]
-        m = minimizer(self._loss, theta, self._optimizer,
+
+        # Initial parameter guess: fit the sampled point with largest probability
+        self._theta_init = np.zeros(self._F.shape[0])
+        self._theta_init[0] = self._sample._log_fmax
+        self._theta = self._theta_init
+        m = minimizer(self._loss, self._theta, self._optimizer,
                       self._gradient, hessian,
                       maxiter=self._maxiter, tol=self._tol,
                       bounds=bounds)
-        self._theta = m.argmin()
+        theta = m.argmin()
+        self._factor_fit = self._family.from_theta(theta)
         return m.info()
 
-    @property
-    def theta(self):
-        if self._output_factor:
-            return self._theta
-        else:
-            return self._sample._cavity.theta + self._theta 
-
     def gaussian(self):
-        return self._family.from_theta(self.theta)
-
+        if self._output_factor:
+            return self._factor_fit
+        else:
+            return self._sample._cavity * self._factor_fit
     
-
-class OnestepKullbackFit(object):
-
-    def __init__(self, sample, family, vmax=None, output_factor=False,
-                 damping=1e-2):
-        self._sample = sample
-        self._dim = sample._x.shape[0]
-        self._npts = sample._x.shape[1]
-        self._family = instantiate_family(family, self._dim)
-        self._vmax = vmax
-        if not vmax is None and family == 'gaussian':
-            raise NotImplementedError('Second-order constraints not implemented for full Gaussian fitting.')
-        self._output_factor = output_factor
-        self._damping = float(damping)
-        self._theta = None
-        self._F = self._family.design_matrix(sample._x)
-        self._run()
-        
-    def _run(self):
-        cn = np.sum(self._sample._w * self._sample._fn)
-        theta = np.dot(self._F, self._sample._w * (self._sample._fn - cn))
-        theta *= (self._damping / cn) / np.sum(self._F ** 2 * self._sample._w, axis=1)
-        if not self._vmax is None:
-            theta[(self._dim + 1):] = np.minimum(theta[(self._dim + 1):], factor_theta2_max(self._vmax, self._sample._cavity))
-        theta[0] = np.log(cn) + self._sample._log_fmax
-        self._theta = theta
-
-    @property
-    def theta(self):
-        if self._output_factor:
-            return self._theta
-        else:
-            return self._sample._cavity.theta + self._theta 
-
-    def gaussian(self):
-        return self._family.from_theta(self.theta)
-
-
-        
+       
     
 # Helper function
 def dist_fit(log_factor, cavity, factorize=True, ndraws=None, output_factor=False, method='kullback', optimizer='lbfgs', vmax=None):
