@@ -3,8 +3,8 @@ Variational sampling
 
 TODO:
 
-Convergence test in bridge approximation
-Test iteration improvement in bridge approximation (???)
+Convergence test in star approximation
+Test iteration improvement in star approximation (???)
 """
 import numpy as np
 from scipy.optimize import fmin_ncg
@@ -384,9 +384,9 @@ def dist_fit(log_factor, cavity, factorize=True, ndraws=None, output_factor=Fals
 
 
 
-# Bridge approximation (iterative M-projection)
+# Star approximation (iterative M-projection)
 
-class BridgeApproximation(object):
+class StarApproximation(object):
 
     def __init__(self, log_target, init_fit, alpha, vmax, learning_rate=1, block_size=None, method='kullback'):
         self._log_target = log_target

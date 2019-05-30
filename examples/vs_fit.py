@@ -3,7 +3,7 @@ import numpy as np
 from variana.dist_fit import VariationalSampling
 from variana.gaussian import FactorGaussian
 
-DIM = 2
+DIM = 100
 BETA = 2
 PROPER = True
 

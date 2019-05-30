@@ -1,5 +1,5 @@
 import numpy as np
-from variana.dist_fit import BridgeApproximation, LaplaceApproximation
+from variana.dist_fit import StarApproximation, LaplaceApproximation
 
 
 def toy_score(x, center=None, K=1, beta=2, proper=True):
@@ -29,7 +29,7 @@ l = LaplaceApproximation(log_target, np.zeros(dim))
 ql = l.fit()
 
 
-v = BridgeApproximation(log_target, (np.zeros(dim), np.full(dim, vmax)),
+v = StarApproximation(log_target, (np.zeros(dim), np.full(dim, vmax)),
                         alpha, vmax, learning_rate=learning_rate, block_size=block_size)
 q = v.fit(niter=niter)
 
