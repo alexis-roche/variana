@@ -18,6 +18,7 @@ def toy_dist(x, c=0, s=1, K=1, beta=BETA, proper=PROPER):
 
 
 optimizer = 'lbfgs'
+method = 'kullback'
 family = 'factor_gaussian'
 if len(sys.argv) > 1:
     optimizer = sys.argv[1]
@@ -27,6 +28,8 @@ if family == 'gaussian':
     vmax = None
 else:
     vmax = 1e5
+if optimizer == 'moment':
+    method = 'moment'
 
 """ 
 Tune the mean and variance of the cavity distribution. If we use
@@ -42,11 +45,10 @@ kernel = FactorGaussian(np.zeros(DIM), np.ones(DIM))
 log_target = lambda x: toy_dist(x, c, s, K=K) - kernel.log(x)
 vs = VariationalSampling(log_target, kernel)
 #q = vs.fit(vmax=1e6, optimizer='newton', hess_diag_approx=True)
-###q, info = vs.fit(vmax=vmax, family=family, optimizer=optimizer, output_info=True)
-q, info = vs.fit(vmax=vmax, family=family, optimizer=optimizer, output_info=True)
+q, info = vs.fit(family=family, method=method, vmax=vmax, optimizer=optimizer, output_info=True)
 
-print(q)
 print(info)
+print(q)
 
 rel_err = lambda x, y: np.max(np.abs(y - x)) / np.maximum(1, np.max(np.abs(x)))
 print('Order-0 error = %f' % rel_err(K, q.K))

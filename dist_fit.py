@@ -10,7 +10,7 @@ import numpy as np
 from scipy.optimize import fmin_ncg
 
 from .utils import probe_time, is_sequence, minimizer, approx_gradient, approx_hessian, approx_hessian_diag
-from .gaussian import instantiate_family, as_gaussian, Gaussian, FactorGaussian, laplace_approximation
+from .gaussian import gaussian_family, as_gaussian, Gaussian, FactorGaussian, laplace_approximation
 
 
 
@@ -132,9 +132,6 @@ class VariationalSampling(object):
         else:
             raise ValueError('unknown method')
 
-        print('DEBUG')
-        print(type(self._fit))
-
         gauss = self._fit.gaussian()
         if output_info:
             if method == 'kullback':
@@ -200,14 +197,15 @@ class MomentFit(object):
         self._sample = sample
         self._dim = sample._x.shape[0]
         self._npts = sample._x.shape[1]
-        self._family = instantiate_family(family, self._dim)
-        self._output_factor = output_factor
+        self._family = str(family)
         self._vmax = vmax
         if not vmax is None and 'family' == 'gaussian':
             raise NotImplementedError('Second-order constraints not implemented for full Gaussian fitting.')
+        self._output_factor = output_factor
         
         # Pre-compute some stuff and cache it
-        self._F = self._family.design_matrix(sample._x)
+        self._family_obj = gaussian_family(self._family, self._dim)
+        self._F = self._family_obj.design_matrix(sample._x)
 
         # Perform fit
         self._run()
@@ -215,12 +213,10 @@ class MomentFit(object):
     def _run(self):
         self._integral = np.dot(self._F, self._sample._w * self._sample._fn)
         self._integral *= np.exp(self._sample._log_fmax)
-        self._full_fit = self._family.from_integral(self._integral)
+        self._full_fit = self._family_obj.from_integral(self._integral)
         if not self._vmax is None:
-            self._full_fit.theta[(self._dim + 1):] = \
-                        np.minimum(self._full_fit.theta[(self._dim + 1):], \
-                        -.5 / self._vmax - self._sample._cavity.theta[(self._dim + 1):])
-        
+            self._full_fit.gate_variance(self._vmax)
+            
     def gaussian(self):
         if self._output_factor:
             return self._full_fit / self._sample._cavity.normalize()
@@ -228,9 +224,6 @@ class MomentFit(object):
             return self._sample._cavity.Z * self._full_fit
             
 
-
-def factor_theta2_max(vmax, cavity):
-    return np.full(cavity.dim, -.5 / vmax) - cavity.theta[(cavity.dim + 1):]
 
 
 class KullbackFit(object):
@@ -255,11 +248,12 @@ class KullbackFit(object):
         self._sample = sample
         self._dim = sample._x.shape[0]
         self._npts = sample._x.shape[1]
-        self._family = instantiate_family(family, self._dim)
+        self._family = str(family)
         self._output_factor = output_factor
 
         # Pre-compute some stuff and cache it
-        self._F = self._family.design_matrix(sample._x)
+        self._family_obj = gaussian_family(self._family, self._dim)
+        self._F = self._family_obj.design_matrix(sample._x)
         self._gn = None
         self._log_gn = None
 
@@ -352,12 +346,12 @@ class KullbackFit(object):
                 hessian = self._hessian_diag
             else:
                 hessian = self._hessian
-        if self._vmax is None:
-            bounds = None
-        else:
-            theta2_max = factor_theta2_max(self._vmax, self._sample._cavity)
-            bounds = [(None, None) for i in range(self._dim + 1)]
-            bounds += [(None, theta2_max[i]) for i in range(self._dim)]
+        bounds = None
+        if not self._vmax is None:
+            if self._family == 'factor_gaussian':
+                theta2_max = -.5 / self._vmax - self._sample._cavity.theta[(self._dim + 1):]
+                bounds = [(None, None) for i in range(self._dim + 1)]
+                bounds += [(None, theta2_max[i]) for i in range(self._dim)]
 
         # Initial parameter guess: fit the sampled point with largest probability
         self._theta_init = np.zeros(self._F.shape[0])
@@ -368,7 +362,7 @@ class KullbackFit(object):
                       maxiter=self._maxiter, tol=self._tol,
                       bounds=bounds)
         theta = m.argmin()
-        self._factor_fit = self._family.from_theta(theta)
+        self._factor_fit = self._family_obj.from_theta(theta)
         return m.info()
 
     def gaussian(self):

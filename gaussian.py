@@ -308,6 +308,9 @@ class Gaussian(object):
                     m.reshape((1, self._dim))))[np.triu_indices(self._dim)]
         return np.concatenate((np.array((Z,)), I1, I2))
 
+    def gate_variance(self, vmax):
+        raise NotImplementedError('Not implemented yet.')
+    
     def __str__(self):
         s = 'Gaussian distribution with parameters:\n'
         s += 'K = %f\n' % self.K
@@ -377,8 +380,6 @@ class FactorGaussian(Gaussian):
             theta1 = self._invv * self._m
             theta0 = self._logK - .5 * np.dot(self._m, theta1)
             self._theta = np.concatenate((np.array((theta0,)), theta1, theta2))
-
-
             
     def _init_cache(self):
         self._logK = None
@@ -512,7 +513,9 @@ class FactorGaussian(Gaussian):
         I2 = Z * (self._v + m ** 2)
         return np.concatenate((np.array((Z,)), I1, I2))
 
-    
+    def gate_variance(self, vmax):
+        self._theta[(self._dim + 1):] = np.minimum(self._theta[(self._dim + 1):], -.5 / vmax)
+        
 
 class FactorGaussianFamily(GaussianFamily):
 
@@ -556,7 +559,7 @@ def as_gaussian(g):
     return G
     
 
-def instantiate_family(key, dim): 
+def gaussian_family(key, dim): 
     """
     Instantiate Gaussian family
     """
