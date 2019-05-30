@@ -2,8 +2,8 @@ import numpy as np
 from variana.dist_fit import VariationalSampling
 from variana.gaussian import FactorGaussian
 
-DIM = 10
-BETA = 2
+DIM = 100
+BETA = 1.2
 PROPER = True
 
 
@@ -28,8 +28,9 @@ s = 1 + np.random.rand(DIM)
 
 kernel = FactorGaussian(np.zeros(DIM), np.ones(DIM))
 log_target = lambda x: toy_dist(x, c, s, K=K) - kernel.log(x)
-vs = VariationalSampling(log_target, kernel, ndraws=10*DIM)
-q = vs.fit(vmax=1e6, optimizer='newton', hess_diag_approx=True)
+vs = VariationalSampling(log_target, kernel)
+#q = vs.fit(vmax=1e6, optimizer='newton', hess_diag_approx=True)
+q = vs.fit(vmax=1e6, optimizer='steepest')
 ###q = vs.fit(family='gaussian')
 print(q)
 
@@ -40,7 +41,7 @@ print('Order-0 error = %f' % rel_err(K, q.K))
 print('Order-1 error = %f' % rel_err(c, q.m))
 print('Order-2 error = %f' % rel_err(s ** 2, q.v))
 
-q2 = vs.fit(vmax=1e6, optimizer='newton', hess_diag_approx=False)
+q2 = vs.fit(vmax=1e6, optimizer='newton')
 
 print(q2)
 print('Order-0 dev = %f' % rel_err(q2.K, q.K))

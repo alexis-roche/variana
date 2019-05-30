@@ -143,15 +143,12 @@ class Gaussian(object):
         """
         self._m = m
         self._V = V
-        # Compute the inverse and the square root of the variance
-        # matrix
         v, P = np.linalg.eigh(V)
         invv = safe_inv(v)
         v = 1 / force_tiny(invv)
         self._invV = np.dot(np.dot(P, np.diag(invv)), P.T)
         self._logdetV = np.sum(np.log(v))
         self._sqrtV = np.dot(np.dot(P, np.diag(np.abs(v) ** .5)), P.T)
-        ###
         if not logK is None:
             self._logK = logK
             self._logZ = logK_to_logZ(self._logK, self._dim, self._logdetV)

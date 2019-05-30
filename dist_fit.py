@@ -122,7 +122,9 @@ class VariationalSampling(object):
 
         damping: float
           Only applicable to 'onestep' fitting method.
-        
+
+        hess_diag_approx: bool
+          Only applicable to 'newton' optimizer.        
         """
         if method == 'kullback':
             self._fit = KullbackFit(self, family, vmax=vmax, output_factor=output_factor, 

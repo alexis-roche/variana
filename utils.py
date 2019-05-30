@@ -4,7 +4,7 @@ Basic implementation of Gauss-Newton gradient descent scheme.
 """
 from time import time
 import numpy as np
-from scipy.linalg import cho_factor, cho_solve, eigh
+from scipy.linalg import cho_factor, cho_solve, pinvh
 from scipy.optimize import fmin_cg, fmin_ncg, fmin_bfgs, fmin_l_bfgs_b
 
 
@@ -57,7 +57,7 @@ class SteepestDescent(object):
                 self._hess_f_inv = None
             else:
                 self._hess_f = np.asarray(hess_f)
-                self._hess_f_inv = inv_sym_matrix(hess_f)
+                self._hess_f_inv = pinvh(hess_f)
         if proj is None:
             self._proj = lambda x: x
         else:
@@ -77,7 +77,7 @@ class SteepestDescent(object):
         dx = -self._grad_f(self._x, *self._args)
         self._calls[1] += 1
         if not self._hess_f_inv is None:
-            dx = np.dot(self._hess_inv, dx)
+            dx = np.dot(self._hess_f_inv, dx)
         return np.nan_to_num(dx)
     
     @probe_time
@@ -293,13 +293,14 @@ def squash(x):
 
 
 def bounds_to_proj(bounds):
-
+    """
+    Convert sequence of min-max bounds to a projection function.
+    """
     replace_none = lambda x, a: a if x is None else x   
     b0 = squash(np.array([replace_none(b[0], -np.inf) for b in bounds]))
     b1 = squash(np.array([replace_none(b[1], np.inf) for b in bounds]))
     b0_is_inf = (np.max(b0) == -np.inf)
     b1_is_inf = (np.min(b1) == np.inf)
-
     if b0_is_inf:
         if b1_is_inf:
             proj = lambda x: x
@@ -309,7 +310,6 @@ def bounds_to_proj(bounds):
         proj = lambda x: (x >= b0) * x
     else:
         proj = lambda x: (x >= b0) * (x <= b1) * x
-
     return proj
 
 
