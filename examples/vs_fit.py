@@ -10,9 +10,8 @@ PROPER = True
 
 def toy_dist(x, c=0, s=1, K=1, beta=BETA, proper=PROPER):
     """
-    Function that takes an array with shape (dim, n) as input and
-    returns an array with shape (n,) that contains the corresponding
-    target log-distribution values.
+    "Function that takes a 1d array as input and return the
+    log-distribution value.
     """
     return np.log(K) - np.sum(((2 * proper -1) ** np.arange(DIM)) * np.abs((x - c) / s) ** beta, 0) / beta
 
