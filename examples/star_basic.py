@@ -30,7 +30,7 @@ ql = l.fit()
 
 
 v = StarApproximation(log_target, (np.zeros(dim), np.full(dim, vmax)),
-                        alpha, vmax, learning_rate=learning_rate, block_size=block_size)
+                      alpha, vmax, learning_rate=learning_rate, block_size=block_size)
 q = v.fit(niter=niter)
 
 print('True K = %f' % K)

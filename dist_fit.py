@@ -90,7 +90,7 @@ class VariationalSampling(object):
         self._log_fn -= self._log_fmax
         self._fn = np.exp(self._log_fn)
     
-    def fit(self, method='kullback', family='factor_gaussian',
+    def fit(self, proxy='discrete_kl', family='factor_gaussian',
             output_factor=False, vmax=None,
             optimizer='lbfgs', tol=1e-5, maxiter=None,
             hess_diag_approx=False, output_info=False):
@@ -99,8 +99,8 @@ class VariationalSampling(object):
 
         Parameters
         ----------
-        method: str
-          'moment' or 'kullback'.
+        proxy: str
+          'likelihood' or 'discrete_kl'.
 
         family: str
           'factor_gaussian' or 'gaussian'.
@@ -112,29 +112,29 @@ class VariationalSampling(object):
           If float, applies a maximum variance constraint to the fit.
 
         optimizer: str
-          Only applicable to 'kullback' fitting method.
+          Only applicable to 'discrete_kl' fitting proxy.
 
         tol: float
-          Only applicable to 'kullback' fitting method.
+          Only applicable to 'discrete_kl' fitting proxy.
 
         maxiter: int
-          Only applicable to 'kullback' fitting method.
+          Only applicable to 'discrete_kl' fitting proxy.
 
         hess_diag_approx: bool
           Only applicable to 'newton' optimizer.        
         """
-        if method == 'kullback':
-            self._fit = KullbackFit(self, family, vmax=vmax, output_factor=output_factor, 
-                                    optimizer=optimizer, tol=tol, maxiter=maxiter,
-                                    hess_diag_approx=hess_diag_approx)
-        elif method == 'moment':
-            self._fit = MomentFit(self, family, vmax=vmax, output_factor=output_factor)
+        if proxy == 'discrete_kl':
+            self._fit = DiscreteKLFit(self, family, vmax=vmax, output_factor=output_factor, 
+                                      optimizer=optimizer, tol=tol, maxiter=maxiter,
+                                      hess_diag_approx=hess_diag_approx)
+        elif proxy == 'likelihood':
+            self._fit = LikelihoodFit(self, family, vmax=vmax, output_factor=output_factor)
         else:
-            raise ValueError('unknown method')
+            raise ValueError('unknown proxy')
 
         gauss = self._fit.gaussian()
         if output_info:
-            if method == 'kullback':
+            if proxy == 'discrete_kl':
                 return gauss, self._fit._info
             else:
                 return gauss, None
@@ -188,11 +188,11 @@ def laplace_approx(u, g, h, cavity, optimize=True):
 # Fitting objects
 #########################################################
 
-class MomentFit(object):
+class LikelihoodFit(object):
 
     def __init__(self, sample, family, vmax=None, output_factor=False):
         """
-        Importance weighted likelihood fitting method.
+        Importance weighted likelihood fitting proxy.
         """
         self._sample = sample
         self._dim = sample._x.shape[0]
@@ -226,7 +226,7 @@ class MomentFit(object):
 
 
 
-class KullbackFit(object):
+class DiscreteKLFit(object):
 
     def __init__(self, sample, family, vmax=None, output_factor=False,
                  optimizer='lbfgs', tol=1e-5, maxiter=None,
@@ -374,13 +374,13 @@ class KullbackFit(object):
        
     
 # Helper function
-def dist_fit(log_factor, cavity, factorize=True, ndraws=None, output_factor=False, method='kullback', optimizer='lbfgs', vmax=None):
+def dist_fit(log_factor, cavity, factorize=True, ndraws=None, output_factor=False, proxy='discrete_kl', optimizer='lbfgs', vmax=None):
     vs = VariationalSampling(log_factor, cavity, ndraws=ndraws)
     if factorize:
         family = 'factor_gaussian'
     else:
         family = 'gaussian'
-    return vs.fit(family=family, output_factor=output_factor, method=method, vmax=vmax, optimizer=optimizer)
+    return vs.fit(family=family, output_factor=output_factor, proxy=proxy, vmax=vmax, optimizer=optimizer)
 
 
 
@@ -388,7 +388,7 @@ def dist_fit(log_factor, cavity, factorize=True, ndraws=None, output_factor=Fals
 
 class StarApproximation(object):
 
-    def __init__(self, log_target, init_fit, alpha, vmax, learning_rate=1, block_size=None, method='kullback'):
+    def __init__(self, log_target, init_fit, alpha, vmax, learning_rate=1, block_size=None, proxy='discrete_kl'):
         self._log_target = log_target
         self._fit = as_gaussian(init_fit)
         self._alpha = float(alpha)
@@ -402,7 +402,7 @@ class StarApproximation(object):
             stride = min(block_size, self._fit.dim)
             self._slices = np.append(np.arange(self._fit.dim // stride, dtype=int) * stride,
                                      self._fit.dim)
-        self._method = str(method)
+        self._proxy = str(proxy)
         
     def update(self, block_idx, **kwargs):
         """
@@ -437,13 +437,13 @@ class StarApproximation(object):
             return self._alpha * self._log_target(x)
 
         # Perform local fit by variational sampling
-        if self._method in ('kullback', 'moment'):
+        if self._proxy in ('discrete_kl', 'likelihood'):
             vs = VariationalSampling(log_factor, init_loc_fit ** (1 - self._alpha))
             if is_sequence(self._vmax):
                 vmax = self._vmax[s]
             else:
                 vmax = self._vmax
-            loc_fit = vs.fit(method=self._method, vmax=vmax, **kwargs)
+            loc_fit = vs.fit(proxy=self._proxy, vmax=vmax, **kwargs)
         else:
             la = LaplaceApproximation(log_factor, init_loc_fit.m)
             loc_fit = (init_loc_fit ** (1 - self._alpha)) * la.fit()

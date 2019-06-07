@@ -3,7 +3,7 @@ import numpy as np
 from variana.dist_fit import VariationalSampling
 from variana.gaussian import FactorGaussian
 
-DIM = 100
+DIM = 1
 BETA = 2
 PROPER = True
 
@@ -17,18 +17,21 @@ def toy_dist(x, c=0, s=1, K=1, beta=BETA, proper=PROPER):
 
 
 optimizer = 'lbfgs'
-method = 'kullback'
+proxy = 'discrete_kl'
 family = 'factor_gaussian'
+ndraws = None
 if len(sys.argv) > 1:
     optimizer = sys.argv[1]
     if len(sys.argv) > 2:
         family = sys.argv[2]
+        if len(sys.argv) > 3:
+            ndraws = int(sys.argv[3])
 if family == 'gaussian':
     vmax = None
 else:
     vmax = 1e5
-if optimizer == 'moment':
-    method = 'moment'
+if optimizer == 'likelihood':
+    proxy = 'likelihood'
 
 """ 
 Tune the mean and variance of the cavity distribution. If we use
@@ -42,9 +45,9 @@ s = 1 + np.random.rand(DIM)
 
 kernel = FactorGaussian(np.zeros(DIM), np.ones(DIM))
 log_target = lambda x: toy_dist(x, c, s, K=K) - kernel.log(x)
-vs = VariationalSampling(log_target, kernel)
+vs = VariationalSampling(log_target, kernel, ndraws=ndraws)
 #q = vs.fit(vmax=1e6, optimizer='newton', hess_diag_approx=True)
-q, info = vs.fit(family=family, method=method, vmax=vmax, optimizer=optimizer, output_info=True)
+q, info = vs.fit(family=family, proxy=proxy, vmax=vmax, optimizer=optimizer, output_info=True)
 
 print(info)
 print(q)

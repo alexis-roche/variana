@@ -9,6 +9,11 @@ dimension. A-t-on besoin de travailler par blocs de paramètres?
 A priori sur les paramètres de 2nd ordre de la forme: log pi(theta) =
 lda * theta?
 
+Optimal parameters. 
+
+For proxy == 'discrete_kl', we seem to be doing well with stepsize=0.1 and niter=1000*dim.
+For proxy == 'likelihood', it seems more appropriate to use stepsize=0.001 and niter=1e5*dim.
+
 """
 
 import numpy as np
@@ -20,6 +25,7 @@ import pylab as pl
 
 SQRT_TWO = np.sqrt(2)
 HUGE_LOG = np.log(np.finfo(float).max)
+DEBUG = True
 
 
 def logZ(logK, v):
@@ -31,29 +37,47 @@ def mahalanobis(x, m, v):
     return np.sum((x - m) ** 2 / v)
 
 
-def diff_exp(x, y, s):
+def safe_exp(x, s):
+    """
+    Compute s * exp(x)
+    Assume s > 0
+    """
+    return np.exp(np.minimum(x + np.log(s), HUGE_LOG))
+
+
+def safe_diff_exp(x, y, s):
     """
     Compute s * (exp(x) - exp(y)) in a wise manner
     Assume s > 0
     """
     m = np.maximum(x, y)
     d = np.exp(x - m) - np.exp(y - m)
-    return np.exp(np.minimum(m + np.log(s), HUGE_LOG)) * d
+    ###return np.exp(np.minimum(m + np.log(s), HUGE_LOG)) * d
+    return safe_exp(m, s) * d
 
 
 class OnlineFit(object):
 
-    def __init__(self, log_factor, m, v, vmax=1e5):
+    def __init__(self, log_factor, m, v, vmax=1e5, proxy='discrete_kl'):
+        self._gen_init(m, v, vmax, proxy)
         self._log_factor = log_factor
-        self._dim = len(m)
-        self._logK = log_target(m)
+        self._logK = self._log_factor(self._m)
+
+    def _gen_init(self, m, v, vmax, proxy):
         self._m = np.asarray(m, dtype=float)
         self._v = np.asarray(v, dtype=float)
-        self._logK = self._log_factor(self._m)
         self._m_cavity = self._m.copy()
         self._v_cavity = self._v.copy()
         self._vmax = float(vmax)
-        self._f = np.zeros(2 * self._dim + 1)
+        if proxy == 'discrete_kl':
+            self.force = self._force
+        elif proxy == 'likelihood':
+            self.force = self._force_likelihood
+        else:
+            raise ValueError('Unknown KL divergence proxy')
+        self._dim = len(m)
+        if DEBUG:
+            self._delta = []
 
     def update(self, dtheta, tiny=1e-50):
         prec_ratio = np.maximum(1 - SQRT_TWO * dtheta[(self._dim + 1):], self._v / self._vmax)
@@ -97,11 +121,16 @@ class OnlineFit(object):
         return np.exp(logZ(0, self._v_cavity) - logZ(self._logK, self._v))    
 
     def delta(self, x):
-        return diff_exp(self._log_factor(x), self.log_fitted_factor(x), self.rho())
+        return safe_diff_exp(self._log_factor(x), self.log_fitted_factor(x), self.rho())
         
-    def force(self, x):
+    def _force(self, x):
         # Get the optimal descent direction in fixed coordinates
         return self.delta(x) * self.ortho_basis(x)
+
+    def _force_likelihood(self, x):
+        f = safe_exp(self._log_factor(x), self.rho()) * self.ortho_basis(x)
+        f[0] -= 1
+        return f    
 
     def _record(self, *args):
         if not hasattr(self, '_rec'):
@@ -113,6 +142,8 @@ class OnlineFit(object):
             print('Iteration: %d' % j)
             x = self.sample()
             f = self.force(x)
+            if DEBUG:
+                self._delta.append((safe_exp(self._log_factor(x), self.rho()) - 1, self.delta(x)))
             for i in range(1, nsubiter):
                 beta = 1 / (1 + i)
                 f = (1 - beta) * f + beta * self.force(self.sample())
@@ -120,7 +151,6 @@ class OnlineFit(object):
             self._record(*args)
 
     def factor_fit(self):
-        ### HACK for now
         from variana.gaussian import FactorGaussian
         g = FactorGaussian(self._m, self._v, logK=self._logK) / FactorGaussian(self._m_cavity, self._v_cavity, logK=0)
         return g
@@ -149,15 +179,12 @@ class OnlineFit(object):
 
 class OnlineStarFit(OnlineFit):
 
-    def __init__(self, log_target, m, v, vmax=1e5, alpha=0.1):
-        self._logK = log_target(m)
-        self._m = np.asarray(m, dtype=float)
-        self._v = np.asarray(v, dtype=float)
-        self._vmax = float(vmax)
+    def __init__(self, log_target, m, v, vmax=1e5, alpha=0.1, proxy='discrete_kl'):
+        self._gen_init(m, v, vmax, proxy)
         self._alpha = float(alpha)
-        self._dim = len(m)
         self._rho_base = (1 - self._alpha) ** (-.5 * self._dim)
         self._log_factor = lambda x: alpha * log_target(x)
+        self._logK = log_target(m)
         
     def sample(self):
         return np.sqrt(self._v / (1 - self._alpha)) * np.random.normal(size=self._dim) + self._m        
@@ -186,7 +213,7 @@ def error(x, xt, tiny=1e-10):
     
 
 dim = 50
-power = 2
+power = 3
 
 K = np.random.rand()
 m = 5 * (np.random.rand(dim) - .5)
@@ -199,19 +226,23 @@ l = LaplaceApproximation(log_target, np.zeros(dim))
 ql = l.fit()
 
 # Online parameters
+proxy = 'discrete_kl'
 alpha = 0.1 / dim
 vmax = 1e2
 m0 = np.zeros(dim)
 v0 = np.full(dim, 1)
 
-"""
-tniter = 1000 * dim
-nsubiter = 1
+if proxy == 'discrete_kl':
+    tniter = 1000 * dim
+    nsubiter = 1
+    stepsize = .1
+else:
+    tniter = 100000 * dim
+    nsubiter = 1
+    stepsize = .001
+    
 niter = tniter // nsubiter
-"""
-niter = 1000 * dim
-nsubiter = 1
-stepsize = .1
+
 
 print('alpha = %f, stepsize = %f' % (alpha, stepsize))
 
@@ -224,7 +255,7 @@ pl.figure()
 pl.plot(q._rec)
 pl.show()
 """
-q = OnlineStarFit(log_target, m0, v0, vmax=vmax, alpha=alpha)
+q = OnlineStarFit(log_target, m0, v0, vmax=vmax, alpha=alpha, proxy=proxy)
 q.run(stepsize, niter, nsubiter, np.log(K), m, v)
 pl.figure()
 pl.plot(q._rec)
