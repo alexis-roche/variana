@@ -25,7 +25,6 @@ import pylab as pl
 
 SQRT_TWO = np.sqrt(2)
 HUGE_LOG = np.log(np.finfo(float).max)
-DEBUG = True
 
 
 def logZ(logK, v):
@@ -56,31 +55,37 @@ def safe_diff_exp(x, y, s):
     return safe_exp(m, s) * d
 
 
-class OnlineFit(object):
+class OnlineContextFit(object):
 
-    def __init__(self, log_factor, m, v, vmax=1e5, proxy='discrete_kl'):
-        self._gen_init(m, v, vmax, proxy)
+    def __init__(self, log_factor, m, v, gamma, vmax=1e5, proxy='discrete_kl'):
+        self._gen_init(len(m), gamma, vmax, proxy)
+        self._m_cavity = np.asarray(m, dtype=float)
+        self._v_cavity = np.asarray(v, dtype=float)
         self._log_factor = log_factor
         self._logK = self._log_factor(self._m)
 
-    def _gen_init(self, m, v, vmax, proxy):
-        self._m = np.asarray(m, dtype=float)
-        self._v = np.asarray(v, dtype=float)
-        self._m_cavity = self._m.copy()
-        self._v_cavity = self._v.copy()
+    def _gen_init(self, dim, gamma, vmax, proxy):
+        self._dim = dim
+        self._gamma = float(gamma)
+        self._m = np.zeros(dim)
+        ### TODO: scale initial variance automatically
+        self._v = np.ones(dim)
         self._vmax = float(vmax)
+        self._proxy = str(proxy)
         if proxy == 'discrete_kl':
             self.force = self._force
         elif proxy == 'likelihood':
             self.force = self._force_likelihood
         else:
             raise ValueError('Unknown KL divergence proxy')
-        self._dim = len(m)
-        if DEBUG:
-            self._delta = []
 
-    def update(self, dtheta, tiny=1e-50):
-        prec_ratio = np.maximum(1 - SQRT_TWO * dtheta[(self._dim + 1):], self._v / self._vmax)
+    def update(self, dtheta):
+        prec_ratio = np.maximum(1 - SQRT_TWO * dtheta[(self._dim + 1):], self._v / self._vmax)        
+        """
+        prec_ratio = 1 - SQRT_TWO * dtheta[(self._dim + 1):]
+        if np.min(prec_ratio - self._v / self._vmax) < 0:
+            return False
+        """
         self._v /= prec_ratio
         mean_diff = (self._v / prec_ratio) * dtheta[1:(self._dim + 1)]
         self._m += mean_diff
@@ -132,23 +137,21 @@ class OnlineFit(object):
         f[0] -= 1
         return f    
 
-    def _record(self, *args):
+    def _record(self):
         if not hasattr(self, '_rec'):
             self._rec = []
         self._rec.append(self._logK)
     
-    def run(self, stepsize, niter, nsubiter, *args):
+    def run(self, niter, nsubiter=1):
         for j in range(niter):
             print('Iteration: %d' % j)
             x = self.sample()
             f = self.force(x)
-            if DEBUG:
-                self._delta.append((safe_exp(self._log_factor(x), self.rho()) - 1, self.delta(x)))
             for i in range(1, nsubiter):
                 beta = 1 / (1 + i)
                 f = (1 - beta) * f + beta * self.force(self.sample())
-            self.update(stepsize * f)
-            self._record(*args)
+            self.update(self._gamma * f)
+            self._record()
 
     def factor_fit(self):
         from variana.gaussian import FactorGaussian
@@ -175,19 +178,19 @@ class OnlineFit(object):
     def v(self):
         return self._v
 
+
     
+class OnlineStarFit(OnlineContextFit):
 
-class OnlineStarFit(OnlineFit):
-
-    def __init__(self, log_target, m, v, vmax=1e5, alpha=0.1, proxy='discrete_kl'):
-        self._gen_init(m, v, vmax, proxy)
+    def __init__(self, log_target, dim, alpha, gamma, vmax=1e5, proxy='discrete_kl'):
+        self._gen_init(dim, gamma, vmax, proxy)
         self._alpha = float(alpha)
-        self._rho_base = (1 - self._alpha) ** (-.5 * self._dim)
+        self._rho_base = (1 - self._alpha) ** (-self._dim / 2)
         self._log_factor = lambda x: alpha * log_target(x)
         self._logK = log_target(m)
         
     def sample(self):
-        return np.sqrt(self._v / (1 - self._alpha)) * np.random.normal(size=self._dim) + self._m        
+        return np.sqrt(self._v / (1 - self._alpha)) * np.random.normal(size=self._dim) + self._m
     
     def log_fitted_factor(self, x):
         return self._alpha * self.log(x)
@@ -195,12 +198,36 @@ class OnlineStarFit(OnlineFit):
     def rho(self):
         return np.exp(-self._alpha * self._logK) * self._rho_base
 
+    def _record(self):
+        if not hasattr(self, '_rec'):
+            self._rec = []
+        self._rec.append((self._logK, rms(self._m), rms(self._v)))
+
+        
+        
+class OnlineFit(OnlineContextFit):
+
+    def __init__(self, log_target, dim, gamma, vmax=1e5):
+        self._gen_init(dim, gamma, vmax, 'discrete_kl')
+        self._log_target = log_target
+        self._logK = log_target(m)
+
+    def sample(self):
+        return np.sqrt(self._v) * np.random.normal(size=self._dim) + self._m
+
+    def delta(self, x):
+        return self._log_target(x) - self.log(x)
+
     def _record(self, *args):
         if not hasattr(self, '_rec'):
             self._rec = []
-        self._rec.append((error(self._logK, args[0]), error(self._m, args[1]), error(self._v, args[2])))
-    
-    
+        ###self._rec.append((error(self._logK, args[0]), error(self._m, args[1]), error(self._v, args[2])))
+        self._rec.append((self._logK, rms(self._m), rms(self._v)))
+
+                         
+def rms(x):
+    return np.sqrt(np.sum(x ** 2))
+                         
         
 def toy_score(x, m=0, v=1, K=1, power=2, proper=True):
     x = (x - m) / np.sqrt(v)
@@ -210,15 +237,16 @@ def toy_score(x, m=0, v=1, K=1, power=2, proper=True):
 def error(x, xt, tiny=1e-10):
     ###return np.max(np.abs(x - xt) / np.abs(xt))
     return np.max(np.abs(x - xt))
-    
+   
 
-dim = 50
-power = 3
 
+
+dim = 10
+power = 2
 K = np.random.rand()
 m = 5 * (np.random.rand(dim) - .5)
 v = 5 * (np.random.rand(dim) + 1)
-#K, m, v = 1, 0, 1
+###K, m, v = 1, 0, 1
 
 # Laplace approximation
 log_target = lambda x: toy_score(x, m, v, K, power)
@@ -226,41 +254,42 @@ l = LaplaceApproximation(log_target, np.zeros(dim))
 ql = l.fit()
 
 # Online parameters
-proxy = 'discrete_kl'
-alpha = 0.1 / dim
+proxy = 'discrete_kl' ###proxy = 'likelihood'
 vmax = 1e2
-m0 = np.zeros(dim)
-v0 = np.full(dim, 1)
+gamma0 = 0.01 / np.sqrt(dim)
+alpha = .7 ###/ dim 
+gamma = gamma0 * ((1 - alpha) ** (dim / 2)) / alpha
+niter = int(10 / gamma0)
 
-if proxy == 'discrete_kl':
-    tniter = 1000 * dim
-    nsubiter = 1
-    stepsize = .1
-else:
-    tniter = 100000 * dim
-    nsubiter = 1
-    stepsize = .001
-    
-niter = tniter // nsubiter
+if proxy == 'likelihood':
+    niter *= 100
+    gamma /= 100    
 
-
-print('alpha = %f, stepsize = %f' % (alpha, stepsize))
+print('alpha = %f, gamma = %f' % (alpha, gamma))
 
 
 """
-q = OnlineFit(log_target, m0, v0, vmax=vmax)
-q.run(stepsize, niter, nsubiter)
+q = OnlineContextFit(log_target, np.zeros(dim), np.ones(dim), gamma, vmax=vmax, proxy=proxy)
+q.run(niter)
 g = q.factor_fit()
 pl.figure()
 pl.plot(q._rec)
 pl.show()
 """
-q = OnlineStarFit(log_target, m0, v0, vmax=vmax, alpha=alpha, proxy=proxy)
-q.run(stepsize, niter, nsubiter, np.log(K), m, v)
+
+q = OnlineStarFit(log_target, dim, alpha, gamma, vmax=vmax, proxy=proxy)
+q.run(niter)
 pl.figure()
 pl.plot(q._rec)
 pl.legend(('K', 'm', 'v'))
 pl.show()
 
-
+qc = OnlineFit(log_target, dim, gamma0, vmax=vmax)
+### Rule of thumb: set the simple online fit step size as apha times
+### the star fit step size
+qc.run(niter)
+pl.figure()
+pl.plot(qc._rec)
+pl.legend(('K', 'm', 'v'))
+pl.show()
 
