@@ -9,16 +9,22 @@ dimension. A-t-on besoin de travailler par blocs de paramètres?
 A priori sur les paramètres de 2nd ordre de la forme: log pi(theta) =
 lda * theta?
 
-Optimal parameters. 
+Scale initial variance automatically. Should we start from small or
+large variance??? Clearly, the best is to start from a good guess. For
+CNN, we can use standard tensor flow random initializer as a starting
+point.
 
-For proxy == 'discrete_kl', we seem to be doing well with stepsize=0.1 and niter=1000*dim.
-For proxy == 'likelihood', it seems more appropriate to use stepsize=0.001 and niter=1e5*dim.
+Optimal parameters? 
+
+For proxy == 'discrete_kl', we seem to be doing well with gamma=0.1
+and niter=1000*dim.  For proxy == 'likelihood', it seems more
+appropriate to use gamma=0.001 and niter=1e5*dim.
 
 """
-
 import numpy as np
 from variana.dist_fit import LaplaceApproximation
 from variana.gaussian import FactorGaussian
+from variana.toy_dist import ExponentialPowerLaw
 
 import pylab as pl
 
@@ -68,7 +74,6 @@ class OnlineContextFit(object):
         self._dim = dim
         self._gamma = float(gamma)
         self._m = np.zeros(dim)
-        ### TODO: scale initial variance automatically
         self._v = np.ones(dim)
         self._vmax = float(vmax)
         self._proxy = str(proxy)
@@ -167,8 +172,12 @@ class OnlineContextFit(object):
         return np.exp(self._logK)
 
     @property
+    def logZ(self):
+        return logZ(self._logK, self._v)
+    
+    @property
     def Z(self):
-        return np.exp(logZ(self._logK, self._v))
+        return np.exp(self.logZ)
 
     @property
     def m(self):
@@ -178,6 +187,8 @@ class OnlineContextFit(object):
     def v(self):
         return self._v
 
+    def error(self, logZ, m, v):
+        return np.array((error(self.logZ, logZ), error(self._m, m), error(self._v, v)))
 
     
 class OnlineStarFit(OnlineContextFit):
@@ -205,7 +216,7 @@ class OnlineStarFit(OnlineContextFit):
 
         
         
-class OnlineFit(OnlineContextFit):
+class OnlineSimpleFit(OnlineContextFit):
 
     def __init__(self, log_target, dim, gamma, vmax=1e5):
         self._gen_init(dim, gamma, vmax, 'discrete_kl')
@@ -221,55 +232,51 @@ class OnlineFit(OnlineContextFit):
     def _record(self, *args):
         if not hasattr(self, '_rec'):
             self._rec = []
-        ###self._rec.append((error(self._logK, args[0]), error(self._m, args[1]), error(self._v, args[2])))
         self._rec.append((self._logK, rms(self._m), rms(self._v)))
 
                          
 def rms(x):
     return np.sqrt(np.sum(x ** 2))
                          
-        
-def toy_score(x, m=0, v=1, K=1, power=2, proper=True):
-    x = (x - m) / np.sqrt(v)
-    return np.log(K) - np.sum(((2 * proper - 1) ** np.arange(len(x))) * np.abs(x) ** power, 0) / power
-
 
 def error(x, xt, tiny=1e-10):
     ###return np.max(np.abs(x - xt) / np.abs(xt))
     return np.max(np.abs(x - xt))
    
 
-
-
-dim = 10
-power = 2
+dim = 100
+beta = 2
 K = np.random.rand()
 m = 5 * (np.random.rand(dim) - .5)
-v = 5 * (np.random.rand(dim) + 1)
+s2 = 5 * (np.random.rand(dim) + 1)
 ###K, m, v = 1, 0, 1
 
+# Target definition
+target = ExponentialPowerLaw(m, s2, logK=np.log(K), beta=beta)
+
 # Laplace approximation
-log_target = lambda x: toy_score(x, m, v, K, power)
-l = LaplaceApproximation(log_target, np.zeros(dim))
+l = LaplaceApproximation(target.log, np.zeros(dim))
 ql = l.fit()
 
 # Online parameters
-proxy = 'discrete_kl' ###proxy = 'likelihood'
+proxy = 'discrete_kl'
+###proxy = 'likelihood'
 vmax = 1e2
-gamma0 = 0.01 / np.sqrt(dim)
-alpha = .7 ###/ dim 
-gamma = gamma0 * ((1 - alpha) ** (dim / 2)) / alpha
-niter = int(10 / gamma0)
+alpha = .1 / np.sqrt(dim)
+gamma_s = .01 / np.sqrt(dim)
+gamma = gamma_s * ((1 - alpha) ** (dim / 2)) / alpha
+niter = int(10 / gamma_s)
 
+"""
 if proxy == 'likelihood':
     niter *= 100
     gamma /= 100    
-
+"""
 print('alpha = %f, gamma = %f' % (alpha, gamma))
 
 
 """
-q = OnlineContextFit(log_target, np.zeros(dim), np.ones(dim), gamma, vmax=vmax, proxy=proxy)
+q = OnlineContextFit(target.log, np.zeros(dim), np.ones(dim), gamma, vmax=vmax, proxy=proxy)
 q.run(niter)
 g = q.factor_fit()
 pl.figure()
@@ -277,19 +284,21 @@ pl.plot(q._rec)
 pl.show()
 """
 
-q = OnlineStarFit(log_target, dim, alpha, gamma, vmax=vmax, proxy=proxy)
+q = OnlineStarFit(target.log, dim, alpha, gamma, vmax=vmax, proxy=proxy)
 q.run(niter)
 pl.figure()
 pl.plot(q._rec)
 pl.legend(('K', 'm', 'v'))
 pl.show()
+print('Error star fit = %s (alpha = %3.2f)' % (q.error(target.logZ, target.m, target.v), q._alpha))
 
-qc = OnlineFit(log_target, dim, gamma0, vmax=vmax)
-### Rule of thumb: set the simple online fit step size as apha times
-### the star fit step size
+qc = OnlineSimpleFit(target.log, dim, gamma_s, vmax=vmax)
+### Set the simple online fit step size as apha times the star fit
+### step size
 qc.run(niter)
 pl.figure()
 pl.plot(qc._rec)
 pl.legend(('K', 'm', 'v'))
 pl.show()
+print('Error simple fit = %s' % qc.error(target.logZ, target.m, target.v))
 

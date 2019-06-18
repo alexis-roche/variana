@@ -186,13 +186,11 @@ alpha = .5
 learning_rate = .1
 niter = 100
 log_target = lambda w: lr.log_posterior(w)
-block_size = None
-start = (np.zeros(lr.X.shape[1]), np.full(lr.X.shape[1], prior_var))
-v = StarApproximation(log_target, start, alpha, prior_var, learning_rate=learning_rate, block_size=block_size, proxy='laplace')
+###start = (np.zeros(lr.X.shape[1]), np.full(lr.X.shape[1], prior_var))
+start = (np.zeros(lr.X.shape[1]), np.ones(lr.X.shape[1]))
+v = StarApproximation(log_target, start, alpha, prior_var, learning_rate=learning_rate)
 q = v.fit(niter=niter)
 
 # Print out some stuff
-print('Laplace')
-print('Log-likelihood = %f, Peak = %f' % (lr.log_likelihood(ql.m), ql.logK))
-print('Star')
-print('Log-likelihood = %f, Peak = %f' % (lr.log_likelihood(q.m), q.logK))
+print('Laplace: log-likelihood = %f, peak = %f' % (lr.log_likelihood(ql.m), ql.logK))
+print('Star: log-likelihood = %f, peak = %f' % (lr.log_likelihood(q.m), q.logK))

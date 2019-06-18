@@ -230,13 +230,13 @@ class Gaussian(object):
         self._theta[indices] = np.asarray(theta).squeeze()
         self._init_cache()
       
-    def mahalanobis(self, xs):
-        if xs.ndim == 1:
+    def mahalanobis(self, x):
+        if x.ndim == 1:
             m = self.m
         else:
-            m = np.expand_dims(self.m, -1)
-        ys = xs - m
-        return np.sum(ys * np.dot(self.invV, ys), 0)
+            m = self.m[:, None]
+        xc = x - m
+        return np.sum(xc * np.dot(self.invV, xc), 0)
 
     def log(self, xs):
         return self.logK - .5 * self.mahalanobis(xs)
@@ -450,14 +450,14 @@ class FactorGaussian(Gaussian):
             self._update_cache()
         return np.diag(np.sqrt(np.abs(self._v)))
 
-    def mahalanobis(self, xs):
-        if xs.ndim == 1:
+    def mahalanobis(self, x):
+        if x.ndim == 1:
             m = self.m
             invv = self.invv
         else:
-            m = np.expand_dims(self.m, -1)
-            invv = np.expand_dims(self.invv, -1)
-        return np.sum(invv * ((xs - m) ** 2), 0)
+            m = self.m[:, None]
+            invv = self.invv[:, None]
+        return np.sum(invv * ((x - m) ** 2), 0)
 
     def __str__(self):
         s = 'Factor Gaussian distribution with parameters:\n'
