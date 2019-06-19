@@ -2,10 +2,13 @@ import numpy as np
 from scipy.special import gamma
 
 
+def safe_abs(x, tiny=1e-100):
+    return np.maximum(np.abs(x), tiny)
+
 
 class ExponentialPowerLaw():
 
-    def __init__(self, m, s2, logK=0, beta=2.0):
+    def __init__(self, m, s2, logK=0, beta=2.0, tiny=1e-100):
         """
         Distribution form:
 
@@ -18,19 +21,20 @@ class ExponentialPowerLaw():
         g1 = gamma(1 / self._beta)
         self._v = (g3 / g1) * np.asarray(s2)
         self._s = np.sqrt(np.asarray(s2))
-        self._logZ = logK + self._dim * np.log(2 * g1 / self._beta) + np.sum(np.log(self._s))
-        ###self._logK = logK + (self._dim / 2) * (np.log((2 * g1 ** 3) / (np.pi * g3 * self._beta ** 2)))
         self._logK = logK
-        
+        self._logZ = logK + self._dim * np.log(2 * g1 / self._beta) + np.sum(np.log(self._s))
+
     def log(self, x):
-        if x.ndim == 1:
-            m = self._m
-            s = self._s
-        else:
-            m = self._m[:, None]
-            s = self._s[:, None]
-        xc = np.abs((x - m) / s)
-        return self._logK - np.sum(xc ** self._beta, 0)
+        xc = (x - self._m) / self._s
+        return self._logK - np.sum(safe_abs(xc) ** self._beta, 0)
+
+    def grad_log(self, x):
+        xc = (x - self._m) / self._s
+        return -self._beta * xc * safe_abs(xc) ** (self._beta - 2) / self._s
+
+    def hess_diag_log(self, x):
+        xc = (x - self._m) / self._s
+        return -self._beta * (self._beta - 1) * safe_abs(xc) ** (self._beta - 2) / (self._s ** 2)
 
     @property
     def m(self):
