@@ -41,33 +41,31 @@ def mahalanobis(x, m, v):
     return np.sum((x - m) ** 2 / v)
 
 
-def safe_exp(x, s):
+def safe_exp(x, log_s):
     """
     Compute s * exp(x)
-    Assume s > 0
     """
-    return np.exp(np.minimum(x + np.log(s), HUGE_LOG))
+    return np.exp(np.minimum(x + log_s, HUGE_LOG))
 
 
-def safe_diff_exp(x, y, s):
+def safe_diff_exp(x, y, log_s):
     """
-    Compute s * (exp(x) - exp(y)) in a wise manner
-    Assume s > 0
+    Compute s * (exp(x) - exp(y))
     """
     m = np.maximum(x, y)
     d = np.exp(x - m) - np.exp(y - m)
-    return safe_exp(m, s) * d
+    return safe_exp(m, log_s) * d
 
 
 
 class OnlineFit(object):
 
     def __init__(self, log_target, dim, gamma, vmax=1e5):
-        self._gen_init(log_target, dim, gamma, vmax)
+        self._gen_init(log_target, dim, vmax)
+        self.reset(gamma)
 
-    def _gen_init(self, log_target, dim, gamma, vmax):
+    def _gen_init(self, log_target, dim, vmax):
         self._dim = dim
-        self._gamma = float(gamma)
         self._vmax = float(vmax)
         self._log_target = log_target
         self._logK = log_target(m)
@@ -78,7 +76,10 @@ class OnlineFit(object):
         self._logZt = 0
         self._mt = 0
         self._vt = 0
-
+        
+    def reset(self, gamma):
+        self._gamma = float(gamma)
+        
     def update_fit(self, dtheta):
         prec_ratio = np.maximum(1 - SQRT_TWO * dtheta[(self._dim + 1):], self._v / self._vmax)
         self._v /= prec_ratio
@@ -173,80 +174,87 @@ class OnlineFit(object):
 class OnlineContextFit(OnlineFit):
 
     def __init__(self, log_factor, m, v, gamma, vmax=1e5, proxy='discrete_kl'):
-        self._gen_init(log_factor, len(m), gamma, vmax)
+        self._gen_init(log_factor, len(m), vmax)
         self._m_cavity = np.asarray(m, dtype=float)
         self._v_cavity = np.asarray(v, dtype=float)
         self._log_factor = log_factor
         self._log_target = None
-        self._init_force(proxy)
-
-    def _init_force(self, proxy):        
         if proxy == 'likelihood':
             self._force = self.force_likelihood
         elif proxy != 'discrete_kl':
             raise ValueError('Unknown proxy')
-   
+        self.reset(gamma)
+
     def sample(self):
         return np.sqrt(self._v_cavity) * np.random.normal(size=self._dim) + self._m_cavity        
 
     def log_fitted_factor(self, x):
         return self.log(x) + .5 * mahalanobis(x, self._m_cavity, self._v_cavity)
 
-    def rho(self):
-        return np.exp(logZ(0, self._v_cavity) - logZ(self._logK, self._v))    
+    def log_rho(self):
+        return logZ(0, self._v_cavity) - logZ(self._logK, self._v)
 
     def epsilon(self, x):
-        return safe_diff_exp(self._log_factor(x), self.log_fitted_factor(x), self.rho())
+        return safe_diff_exp(self._log_factor(x), self.log_fitted_factor(x), self.log_rho())
         
     def force_likelihood(self, x):
-        f = safe_exp(self._log_factor(x), self.rho()) * self.ortho_basis(x)
+        f = safe_exp(self._log_factor(x), self.log_rho()) * self.ortho_basis(x)
         f[0] -= 1
         return f
 
     def factor_fit(self):
         g = FactorGaussian(self._m, self._v, logK=self._logK) / FactorGaussian(self._m_cavity, self._v_cavity, logK=0)
         return g
- 
+
+    def stepsisze(self):
+        return self._gamma
 
         
 class OnlineStarFit(OnlineFit):
 
     def __init__(self, log_target, dim, alpha, gamma, vmax=1e5, proxy='discrete_kl'):
-        self._gen_init(log_target, dim, gamma, vmax)
-        self._alpha = float(alpha)
-        self._rho_base = (1 - self._alpha) ** (-self._dim / 2)
-        self._log_factor = lambda x: alpha * log_target(x)
+        self._gen_init(log_target, dim, vmax)
         if proxy == 'likelihood':
             self._force = self.force_likelihood
         elif proxy != 'discrete_kl':
             raise ValueError('Unknown proxy')
+        self.reset(alpha=alpha, gamma=gamma)
         
+    def reset(self, alpha, gamma=None):
+        self._alpha = float(alpha)
+        self._log_factor = lambda x: self._alpha * self._log_target(x)
+        if not gamma is None:
+            self._gamma = float(gamma)
+
     def sample(self):
         return np.sqrt(self._v / (1 - self._alpha)) * np.random.normal(size=self._dim) + self._m
     
     def log_fitted_factor(self, x):
         return self._alpha * self.log(x)
 
-    def rho(self):
-        return np.exp(-self._alpha * self._logK) * self._rho_base
-    
     def epsilon(self, x):
-        return safe_diff_exp(self._log_factor(x), self.log_fitted_factor(x), self.rho())
+        return safe_diff_exp(self._log_factor(x), self.log_fitted_factor(x), -self._alpha * self._logK)
 
     def force_likelihood(self, x):
-        f = safe_exp(self._log_factor(x), self.rho()) * self.ortho_basis(x)
+        f = safe_exp(self._log_factor(x), -self._alpha * self._logK) * self.ortho_basis(x)
         f[0] -= 1
         return f
 
+    def stepsize(self):
+        return self._gamma * (1 - self._alpha) ** (self._dim / 2)
 
+    
 
 class OnlineStarTaylorFit(OnlineFit):
 
     def __init__(self, log_target, dim, alpha, vmax=1e5, epsilon=1e-5, grad=None, hess_diag=None):
-        self._gen_init(log_target, dim, 1, vmax)
-        self._alpha = float(alpha)
+        self._gen_init(log_target, dim, vmax)
         self._epsilon = float(epsilon)
-        self._log_factor = lambda x: self._alpha * log_target(x)
+        self.reset(alpha, grad=grad, hess_diag=hess_diag)
+
+    def reset(self, alpha, grad=None, hess_diag=None):
+        self._alpha = float(alpha)
+        self._log_factor = lambda x: self._alpha * self._log_target(x)
         if grad is None:
             self._grad_log_factor = lambda x: approx_gradient(self._log_factor, x, self._epsilon)
         else:
@@ -255,7 +263,7 @@ class OnlineStarTaylorFit(OnlineFit):
             self._hess_diag_log_factor = lambda x: approx_hessian_diag(self._log_factor, x, self._epsilon)
         else:
             self._hess_diag_log_factor = lambda x: self._alpha * hess_diag(x)
-        
+
     def update(self):
         a = self._log_factor(self._m)
         g = self._grad_log_factor(self._m)
@@ -277,7 +285,7 @@ def error(x, xt, tiny=1e-10):
    
 
 dim = 10
-beta = 1.8
+beta = 1.5
 K = np.random.rand()
 m = 5 * (np.random.rand(dim) - .5)
 s2 = 5 * (np.random.rand(dim) + 1)
@@ -294,9 +302,10 @@ ql = l.fit()
 proxy = 'discrete_kl'
 ###proxy = 'likelihood'
 vmax = 1e2
-alpha = .1 / np.sqrt(dim)
 gamma_s = .01 / np.sqrt(dim)
-gamma = gamma_s * ((1 - alpha) ** (dim / 2)) / alpha
+###alpha = .1 / np.sqrt(dim)
+###gamma = gamma_s / alpha
+alpha, gamma = .1, .1
 niter = int(10 / gamma_s)
 
 print('Dimension = %d, beta = %f' % (dim, beta))
@@ -319,8 +328,14 @@ print('Star fit: alpha = %f, gamma = %f' % (alpha, gamma))
 qs = OnlineStarFit(target.log, dim, alpha, gamma, vmax=vmax, proxy=proxy)
 qs.ground_truth(target.logZ, target.m, target.v)
 qs.run(niter, record=True)
+"""
+qs.reset(alpha=.5)
+print('Star fit: alpha = %f, gamma = %f' % (qs._alpha, qs._gamma))
+qs.run(niter, record=True)
+"""
 print('Error = %3.2f %3.2f %3.2f' % qs.error())
 qs.disp('star')
+
 
 print('Star-Taylor fit: alpha = %f' % alpha)
 qst = OnlineStarTaylorFit(target.log, dim, alpha, vmax=vmax, grad=target.grad_log, hess_diag=target.hess_diag_log)
