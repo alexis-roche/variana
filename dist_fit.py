@@ -558,11 +558,11 @@ def safe_diff_exp(x, y, log_s):
 
 class OnlineIProj(object):
 
-    def __init__(self, log_target, init_fit, gamma, vmax=1e5):
-        self._gen_init(log_target, init_fit, vmax)
+    def __init__(self, log_target, init_fit, gamma, vmax=1e5, vmin=1e-10):
+        self._gen_init(log_target, init_fit, vmax, vmin)
         self.reset(gamma)
 
-    def _gen_init(self, log_target, init_fit, vmax):
+    def _gen_init(self, log_target, init_fit, vmax, vmin):
         self._log_target = log_target
         if isinstance(init_fit, OnlineIProj):
             self._logK = init_fit.logK
@@ -570,9 +570,10 @@ class OnlineIProj(object):
             init_fit = as_gaussian(init_fit)
             self._logK = log_target(init_fit.m)
         self._m = init_fit.m
-        self._v = init_fit.v
+        self._v = np.minimum(np.maximum(init_fit.v, vmin), vmax)
         self._dim = len(self._m)
         self._vmax = float(vmax)
+        self._vmin = float(vmin)
         self._force = self.force
         # Init ground truth parameters
         self._logZt = 0
@@ -583,7 +584,7 @@ class OnlineIProj(object):
         self._gamma = float(gamma)
         
     def update_fit(self, dtheta):
-        prec_ratio = np.maximum(1 - SQRT_TWO * dtheta[(self._dim + 1):], self._v / self._vmax)
+        prec_ratio = np.minimum(np.maximum(1 - SQRT_TWO * dtheta[(self._dim + 1):], self._v / self._vmax), self._v / self._vmin)
         self._v /= prec_ratio
         mean_diff = (np.sqrt(self._v) / prec_ratio) * dtheta[1:(self._dim + 1)]
         self._m += mean_diff
@@ -673,9 +674,9 @@ class OnlineIProj(object):
 
 class OnlineContextFit(OnlineIProj):
 
-    def __init__(self, log_factor, cavity, gamma, vmax=1e5, proxy='discrete_kl'):
+    def __init__(self, log_factor, cavity, gamma, vmax=1e5, vmin=1e-10, proxy='discrete_kl'):
         self._cavity = as_gaussian(cavity)
-        self._gen_init(log_factor, self._cavity.copy(), vmax)
+        self._gen_init(log_factor, self._cavity.copy(), vmax, vmin)
         self._log_factor = log_factor
         self._log_target = None
         if proxy == 'likelihood':
@@ -712,8 +713,8 @@ class OnlineContextFit(OnlineIProj):
     
 class OnlineStarFit(OnlineIProj):
 
-    def __init__(self, log_target, init_fit, alpha, gamma, vmax=1e5, proxy='discrete_kl'):
-        self._gen_init(log_target, init_fit, vmax)
+    def __init__(self, log_target, init_fit, alpha, gamma, vmax=1e5, vmin=1e-10, proxy='discrete_kl'):
+        self._gen_init(log_target, init_fit, vmax, vmin)
         if proxy == 'likelihood':
             self._force = self.force_likelihood
         elif proxy != 'discrete_kl':
@@ -747,8 +748,8 @@ class OnlineStarFit(OnlineIProj):
     
 class OnlineMProj(OnlineIProj):
 
-    def __init__(self, log_target, init_fit, gamma, lda=1, vmax=1e5, proxy='discrete_kl'):
-        self._gen_init(log_target, init_fit, vmax)
+    def __init__(self, log_target, init_fit, gamma, lda=1, vmax=1e5, vmin=1e-10, proxy='discrete_kl'):
+        self._gen_init(log_target, init_fit, vmax, vmin)
         if proxy == 'likelihood':
             self._force = self.force_likelihood
         elif proxy != 'discrete_kl':
@@ -777,8 +778,8 @@ class OnlineMProj(OnlineIProj):
 
 class OnlineMProj0(OnlineIProj):
 
-    def __init__(self, log_target, init_fit, gamma, lda=0, vmax=1e5, proxy='discrete_kl'):
-        self._gen_init(log_target, init_fit, vmax)
+    def __init__(self, log_target, init_fit, gamma, lda=0, vmax=1e5, vmin=1e-10, proxy='discrete_kl'):
+        self._gen_init(log_target, init_fit, vmax, vmin)
         if proxy == 'likelihood':
             self._force = self.force_likelihood
         elif proxy != 'discrete_kl':
@@ -816,7 +817,7 @@ class OnlineMProj0(OnlineIProj):
 class OnlineStarTaylorFit(OnlineIProj):
 
     def __init__(self, log_target, init_fit, alpha, vmax=1e5, epsilon=1e-5, grad=None, hess_diag=None):
-        self._gen_init(log_target, init_fit, vmax)
+        self._gen_init(log_target, init_fit, vmax, 0)
         self._epsilon = float(epsilon)
         self.reset(alpha, grad=grad, hess_diag=hess_diag)
 

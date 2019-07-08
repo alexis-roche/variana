@@ -26,7 +26,7 @@ from variana.dist_fit import LaplaceApproximation, OnlineIProj, OnlineContextFit
 from variana.toy_dist import ExponentialPowerLaw
 
 dim = 1
-beta = 1.4
+beta = 2
 vmax = 1e2
 K = np.random.rand()
 m = 5 * (np.random.rand(dim) - .5)
