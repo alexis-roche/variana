@@ -11,6 +11,10 @@ from scipy.optimize import fmin_cg, fmin_ncg, fmin_bfgs, fmin_l_bfgs_b
 TINY = 1e-100
 
 
+def rms(x):
+    return np.sqrt(np.sum(x ** 2))
+
+
 def probe_time(func):
     def wrapper(x, *args, **kwargs):
         t0 = time()

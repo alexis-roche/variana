@@ -9,7 +9,7 @@ Test iteration improvement in star approximation (???)
 import numpy as np
 from scipy.optimize import fmin_ncg
 
-from .utils import probe_time, is_sequence, minimizer, approx_gradient, approx_hessian, approx_hessian_diag
+from .utils import probe_time, is_sequence, minimizer, approx_gradient, approx_hessian, approx_hessian_diag, rms
 from .gaussian import gaussian_family, as_gaussian, Gaussian, FactorGaussian, laplace_approximation
 
 
@@ -506,3 +506,342 @@ class LaplaceApproximation(object):
             hess = self._hess
         return laplace_approximation(self._x0, self._log_target(self._x0), self._grad(self._x0), hess(self._x0))
     
+
+
+##########################################################
+# ONLINE METHODS
+##########################################################
+
+SQRT_TWO = np.sqrt(2)
+HUGE_LOG = np.log(np.finfo(float).max)
+
+
+def logZ(logK, v):
+    dim = len(v)
+    return logK + .5 * (dim * np.log(2 * np.pi) + np.sum(np.log(v)))
+
+
+def mahalanobis(x, m, v):
+    return np.sum((x - m) ** 2 / v)
+
+
+def split_max(a, b):
+    """
+    Compute m = max(a, b) and returns a tuple (m, a - m, b - m)
+    """
+    if a > b:
+        return a, 0.0, b - a
+    else:
+        return b, a - b, 0.0
+
+
+def safe_exp(x, log_s):
+    """
+    Compute s * exp(x)
+    """
+    return np.exp(np.minimum(x + log_s, HUGE_LOG))
+
+
+def safe_diff_exp(x, y, log_s):
+    """
+    Compute s * (exp(x) - exp(y))
+    """
+    """
+    m = np.maximum(x, y)
+    d = np.exp(x - m) - np.exp(y - m)
+    """
+    m, xc, yc = split_max(x, y)
+    d = np.exp(xc) - np.exp(yc)
+    return safe_exp(m, log_s) * d
+
+
+
+class OnlineIProj(object):
+
+    def __init__(self, log_target, init_fit, gamma, vmax=1e5):
+        self._gen_init(log_target, init_fit, vmax)
+        self.reset(gamma)
+
+    def _gen_init(self, log_target, init_fit, vmax):
+        self._log_target = log_target
+        if isinstance(init_fit, OnlineIProj):
+            self._logK = init_fit.logK
+        else:
+            init_fit = as_gaussian(init_fit)
+            self._logK = log_target(init_fit.m)
+        self._m = init_fit.m
+        self._v = init_fit.v
+        self._dim = len(self._m)
+        self._vmax = float(vmax)
+        self._force = self.force
+        # Init ground truth parameters
+        self._logZt = 0
+        self._mt = 0
+        self._vt = 0
+        
+    def reset(self, gamma):
+        self._gamma = float(gamma)
+        
+    def update_fit(self, dtheta):
+        prec_ratio = np.maximum(1 - SQRT_TWO * dtheta[(self._dim + 1):], self._v / self._vmax)
+        self._v /= prec_ratio
+        mean_diff = (np.sqrt(self._v) / prec_ratio) * dtheta[1:(self._dim + 1)]
+        self._m += mean_diff
+        self._logK += dtheta[0] + .5 * (np.sum(prec_ratio + mean_diff ** 2 / self._v) - self._dim)
+
+    def ortho_basis(self, x):
+        phi1 = (x - self._m) / np.sqrt(self._v)
+        phi2 = (phi1 ** 2 - 1) / SQRT_TWO
+        return np.append(1, np.concatenate((phi1, phi2)))
+   
+    def sample(self):
+        return np.sqrt(self._v) * np.random.normal(size=self._dim) + self._m
+
+    def log(self, x):
+        return self._logK - .5 * mahalanobis(x, self._m, self._v)
+
+    def epsilon(self, x):
+        return self._log_target(x) - self.log(x)
+        
+    def force(self, x):
+        return self.epsilon(x) * self.ortho_basis(x)
+
+    def _record(self):
+        if not hasattr(self, '_rec'):
+            self._rec = []
+        self._rec.append(self.error())
+
+    def ground_truth(self, logZt, mt, vt):
+        self._logZt = logZt
+        self._mt = mt
+        self._vt = vt
+
+    def error(self):
+        return (rms(self.logZ - self._logZt),
+                rms(self._m - self._mt),
+                rms(self._v - self._vt))
+
+    def update(self, nsubiter=1):
+        f = self._force(self.sample())
+        for i in range(1, nsubiter):
+            beta = 1 / (1 + i)
+            f = (1 - beta) * f + beta * self._force(self.sample())
+        self.update_fit(self._gamma * f)
+
+    def run(self, niter, record=False, **kwargs):
+        for i in range(1, niter + 1):
+            if not i % (niter // 10): 
+                print('\rComplete: %2.0f%%' % (100 * i / niter), end='', flush=True)
+            self.update(**kwargs)
+            if record:
+                self._record()
+        print('')
+
+    @property
+    def logK(self):
+        return self._logK
+
+    @property
+    def K(self):
+        return np.exp(self._logK)
+
+    @property
+    def logZ(self):
+        return logZ(self._logK, self._v)
+    
+    @property
+    def Z(self):
+        return np.exp(self.logZ)
+
+    @property
+    def m(self):
+        return self._m
+
+    @property
+    def v(self):
+        return self._v
+
+    def disp(self, title=''):
+        import pylab as pl
+        pl.figure()
+        pl.title(title)
+        pl.plot(self._rec)
+        pl.legend(('Z', 'm', 'v'))
+        pl.show()
+    
+
+
+class OnlineContextFit(OnlineIProj):
+
+    def __init__(self, log_factor, cavity, gamma, vmax=1e5, proxy='discrete_kl'):
+        self._cavity = as_gaussian(cavity)
+        self._gen_init(log_factor, self._cavity.copy(), vmax)
+        self._log_factor = log_factor
+        self._log_target = None
+        if proxy == 'likelihood':
+            self._force = self.force_likelihood
+        elif proxy != 'discrete_kl':
+            raise ValueError('Unknown proxy')
+        self.reset(gamma)
+
+    def sample(self):
+        return np.sqrt(self._cavity.v) * np.random.normal(size=self._dim) + self._cavity.m        
+
+    def log_fitted_factor(self, x):
+        return self.log(x) + .5 * mahalanobis(x, self._cavity.m, self._cavity.v)
+
+    def log_rho(self):
+        return logZ(0, self._cavity.v) - logZ(self._logK, self._v)
+
+    def epsilon(self, x):
+        return safe_diff_exp(self._log_factor(x), self.log_fitted_factor(x), self.log_rho())
+        
+    def force_likelihood(self, x):
+        f = safe_exp(self._log_factor(x), self.log_rho()) * self.ortho_basis(x)
+        f[0] -= 1
+        return f
+
+    def factor_fit(self):
+        g = FactorGaussian(self._m, self._v, logK=self._logK) / FactorGaussian(self._cavity.m, self._cavity.v, logK=0)
+        return g
+
+    def stepsisze(self):
+        return self._gamma
+
+
+    
+class OnlineStarFit(OnlineIProj):
+
+    def __init__(self, log_target, init_fit, alpha, gamma, vmax=1e5, proxy='discrete_kl'):
+        self._gen_init(log_target, init_fit, vmax)
+        if proxy == 'likelihood':
+            self._force = self.force_likelihood
+        elif proxy != 'discrete_kl':
+            raise ValueError('Unknown proxy')
+        self.reset(alpha=alpha, gamma=gamma)
+        
+    def reset(self, alpha, gamma=None):
+        self._alpha = float(alpha)
+        self._log_factor = lambda x: self._alpha * self._log_target(x)
+        if not gamma is None:
+            self._gamma = float(gamma)
+
+    def sample(self):
+        return np.sqrt(self._v / (1 - self._alpha)) * np.random.normal(size=self._dim) + self._m
+    
+    def log_fitted_factor(self, x):
+        return self._alpha * self.log(x)
+
+    def epsilon(self, x):
+        return safe_diff_exp(self._log_factor(x), self.log_fitted_factor(x), -self._alpha * self._logK)
+
+    def force_likelihood(self, x):
+        f = safe_exp(self._log_factor(x), -self._alpha * self._logK) * self.ortho_basis(x)
+        f[0] -= 1
+        return f
+
+    def stepsize(self):
+        return self._gamma * (1 - self._alpha) ** (self._dim / 2)
+
+
+    
+class OnlineMProj(OnlineIProj):
+
+    def __init__(self, log_target, init_fit, gamma, lda=1, vmax=1e5, proxy='discrete_kl'):
+        self._gen_init(log_target, init_fit, vmax)
+        if proxy == 'likelihood':
+            self._force = self.force_likelihood
+        elif proxy != 'discrete_kl':
+            raise ValueError('Unknown proxy')
+        self.reset(lda, gamma)
+        
+    def reset(self, lda, gamma=None):
+        self._lda = float(lda)
+        if not gamma is None:
+            self._gamma = float(gamma)
+        
+    def sample(self):
+        return np.sqrt(self._v / self._lda) * np.random.normal(size=self._dim) + self._m
+    
+    def epsilon(self, x):
+        log_p = self._log_target(x)
+        log_q = self.log(x)
+        aux1 = -self._lda * log_q
+        aux2 = log_q + aux1
+        return safe_diff_exp(log_p + aux1, aux2, 0)
+    
+    def force_likelihood(self, x):
+        raise NotImplementedError('This is a test piece of code.')
+
+
+
+class OnlineMProj0(OnlineIProj):
+
+    def __init__(self, log_target, init_fit, gamma, lda=0, vmax=1e5, proxy='discrete_kl'):
+        self._gen_init(log_target, init_fit, vmax)
+        if proxy == 'likelihood':
+            self._force = self.force_likelihood
+        elif proxy != 'discrete_kl':
+            raise ValueError('Unknown proxy')
+        self.reset(lda, gamma)
+        
+    def log_pi(self, x):
+        return -.5 * (self._dim * np.log(2 * np.pi * self._vmax) + mahalanobis(x, 0, self._vmax))
+
+    def reset(self, lda, gamma=None):
+        self._lda = float(lda)
+        if not gamma is None:
+            self._gamma = float(gamma)
+        
+    def sample(self):
+        if np.random.rand() > (1 - self._lda):
+            return np.sqrt(self._vmax) * np.random.normal(size=self._dim)
+        return np.sqrt(self._v) * np.random.normal(size=self._dim) + self._m
+    
+    def epsilon(self, x):
+        log_p = self._log_target(x)
+        log_q = self.log(x)
+        log_q0 = self.logZ + self.log_pi(x)
+        max1, log_pc, log_qc = split_max(log_p, log_q)
+        num = np.exp(log_pc) - np.exp(log_qc)
+        max2, log_qc, log_q0c = split_max(log_q, log_q0)
+        den = (1 - self._lda) * np.exp(log_qc) + self._lda * np.exp(log_q0c)
+        return np.exp(max1 - max2) * (num / den)
+
+    def force_likelihood(self, x):
+        raise NotImplentedError('This is a test piece of code.')
+
+    
+
+class OnlineStarTaylorFit(OnlineIProj):
+
+    def __init__(self, log_target, init_fit, alpha, vmax=1e5, epsilon=1e-5, grad=None, hess_diag=None):
+        self._gen_init(log_target, init_fit, vmax)
+        self._epsilon = float(epsilon)
+        self.reset(alpha, grad=grad, hess_diag=hess_diag)
+
+    def reset(self, alpha, grad=None, hess_diag=None):
+        self._alpha = float(alpha)
+        self._log_factor = lambda x: self._alpha * self._log_target(x)
+        if grad is None:
+            self._grad_log_factor = lambda x: approx_gradient(self._log_factor, x, self._epsilon)
+        else:
+            self._grad_log_factor = lambda x: self._alpha * grad(x)
+        if hess_diag is None:
+            self._hess_diag_log_factor = lambda x: approx_hessian_diag(self._log_factor, x, self._epsilon)
+        else:
+            self._hess_diag_log_factor = lambda x: self._alpha * hess_diag(x)
+
+    def update(self):
+        a = self._log_factor(self._m)
+        g = self._grad_log_factor(self._m)
+        h = self._hess_diag_log_factor(self._m)
+        prec_ratio = (1 - self._alpha) / self._v - h
+        self._v = np.minimum(1 / prec_ratio, self._vmax)
+        self._m += self._v * g
+        self._logK = (1 - self._alpha) * self._logK + a + .5 * np.sum(self._v * g ** 2)
+
+
+        
+
+  
