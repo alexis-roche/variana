@@ -584,11 +584,11 @@ class OnlineIProj(object):
         self._gamma = float(gamma)
         
     def update_fit(self, dtheta):
-        prec_ratio = np.minimum(np.maximum(1 - SQRT_TWO * dtheta[(self._dim + 1):], self._v / self._vmax), self._v / self._vmin)
-        self._v /= prec_ratio
-        mean_diff = (np.sqrt(self._v) / prec_ratio) * dtheta[1:(self._dim + 1)]
-        self._m += mean_diff
-        self._logK += dtheta[0] + .5 * (np.sum(prec_ratio + mean_diff ** 2 / self._v) - self._dim)
+        p = 1 / self._v
+        self._v = 1 / np.minimum(np.maximum(p * (1 - SQRT_TWO * dtheta[(self._dim + 1):]), 1 / self._vmax), 1 / self._vmin)
+        dm = (np.sqrt(p) * self._v) * dtheta[1:(self._dim + 1)]
+        self._m += dm
+        self._logK += dtheta[0] + .5 * (np.sum((1 / p + dm ** 2) / self._v) - self._dim)
 
     def ortho_basis(self, x):
         phi1 = (x - self._m) / np.sqrt(self._v)
@@ -814,7 +814,7 @@ class OnlineMProj0(OnlineIProj):
 
     
 
-class OnlineStarTaylorFit(OnlineIProj):
+class OnlineLaplaceFit(OnlineIProj):
 
     def __init__(self, log_target, init_fit, alpha, vmax=1e5, epsilon=1e-5, grad=None, hess_diag=None):
         self._gen_init(log_target, init_fit, vmax, 0)

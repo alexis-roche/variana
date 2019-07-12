@@ -22,10 +22,10 @@ For proxy == 'likelihood', we seem to need niter *= 100 and gamma /=
 import numpy as np
 import pylab as pl
 
-from variana.dist_fit import LaplaceApproximation, OnlineIProj, OnlineContextFit, OnlineMProj, OnlineStarFit, OnlineStarTaylorFit
+from variana.dist_fit import LaplaceApproximation, OnlineIProj, OnlineContextFit, OnlineMProj, OnlineStarFit, OnlineLaplaceFit
 from variana.toy_dist import ExponentialPowerLaw
 
-dim = 1
+dim = 10
 beta = 2
 vmax = 1e2
 K = np.random.rand()
@@ -59,7 +59,7 @@ g = q0.factor_fit()
 q0.disp('context')
 """
 
-print('Simple fit: gamma = %f' % gamma_s)
+print('I-projection: gamma = %f' % gamma_s)
 q = OnlineIProj(target.log, (np.zeros(dim), np.ones(dim)), gamma_s, vmax=vmax)
 q.ground_truth(target.logZ, target.m, target.v)
 q.run(niter, record=True)
@@ -77,13 +77,14 @@ qs.run(niter, record=True)
 print('Error = %3.2f %3.2f %3.2f' % qs.error())
 qs.disp('star (alpha=%.2f)' % alpha)
 
-print('Star-Taylor fit: alpha = %f' % alpha)
-qst = OnlineStarTaylorFit(target.log, (np.zeros(dim), np.ones(dim)), alpha, vmax=vmax, grad=target.grad_log, hess_diag=target.hess_diag_log)
+print('Online Laplace fit: alpha = %f' % alpha)
+qst = OnlineLaplaceFit(target.log, (np.zeros(dim), np.ones(dim)), alpha, vmax=vmax, grad=target.grad_log, hess_diag=target.hess_diag_log)
 qst.ground_truth(target.logZ, target.m, target.v)
 qst.run(niter, record=True)
 print('Error = %3.2f %3.2f %3.2f' % qst.error())
 qst.disp('star-taylor (alpha=%.2f)' % alpha)
 
+print('M-projection: gamma = %f' % gamma_s)
 q1 = OnlineMProj(target.log, qs, gamma_s, lda=.75)
 q1.ground_truth(target.logZ, target.m, target.v)
 q1.run(niter, nsubiter=1, record=True)
