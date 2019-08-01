@@ -3,6 +3,7 @@ version = '0.1dev'
 
 from numpy.distutils.misc_util import Configuration
 from numpy.distutils.core import setup
+from Cython.Build import cythonize
 
 
 def configuration(parent_package='', top_path=None):
@@ -14,7 +15,7 @@ def configuration(parent_package='', top_path=None):
     #    quiet=True,
     #)
     config.add_data_dir('tests')
-    #config.add_subpackage('variational_sampling')
+    cythonize('_utils.pyx')
     config.add_extension('_utils', sources=['_utils.c'])   
     return config
 
