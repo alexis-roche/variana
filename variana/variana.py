@@ -228,7 +228,7 @@ class NumEP(object):
             
     def run(self): 
         for a in self.batches:
-	    self.update_factor(a)
+            self.update_factor(a)
 
     def __call__(self):
         for i in range(self.niters):
