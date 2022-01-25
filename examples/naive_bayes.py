@@ -1,6 +1,6 @@
 import numpy as np
 
-from variana.dist_model import GaussianCompositeInference
+from variana import GaussianCompositeInference
 
 SIZE = 100
 CLASSES = 3

@@ -1,6 +1,6 @@
 import sys
 import numpy as np
-from variana.dist_model import Maxent
+from variana import Maxent
 
 avg_spots = 3.5
 optimizer = 'lbfgs'

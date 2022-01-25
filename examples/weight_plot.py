@@ -1,12 +1,12 @@
 import sys
 import numpy as np
 import pylab as pl
-from variana.dist_model import GaussianCompositeInference
 from sklearn.datasets import (load_iris,
                               load_digits,
                               load_breast_cancer,
                               load_wine)
 
+from variana import GaussianCompositeInference
 
 loader = {'iris': load_iris,
           'digits': load_digits,

@@ -1,6 +1,8 @@
 import numpy as np
+
+from variana import ExponentialPowerLaw
 from variana.dist_fit import StarApproximation, LaplaceApproximation
-from variana.toy_dist import ExponentialPowerLaw
+
 
               
 dim = 3

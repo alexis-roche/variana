@@ -1,5 +1,5 @@
 import numpy as np
-from variana.dist_model import Maxent, ConditionalMaxent
+from variana import Maxent, ConditionalMaxent
 
 optimizer = 'lbfgs'
 

@@ -22,8 +22,8 @@ For proxy == 'likelihood', we seem to need niter *= 100 and gamma /=
 import numpy as np
 import pylab as pl
 
-from variana.dist_fit import LaplaceApproximation, OnlineIProj, OnlineContextFit, OnlineMProj, OnlineStarFit, OnlineLaplaceFit
-from variana.toy_dist import ExponentialPowerLaw
+from variana import LaplaceApproximation, ExponentialPowerLaw
+from variana.dist_fit import OnlineIProj, OnlineContextFit, OnlineMProj, OnlineStarFit, OnlineLaplaceFit
 
 dim = 10
 beta = 2

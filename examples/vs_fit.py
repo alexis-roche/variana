@@ -1,7 +1,7 @@
 import sys
 import numpy as np
-from variana.dist_fit import VariationalSampling
-from variana.gaussian import FactorGaussian
+
+from variana import VariationalSampling, FactorGaussian
 
 DIM = 1
 BETA = 2

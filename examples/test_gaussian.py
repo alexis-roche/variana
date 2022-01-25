@@ -1,5 +1,6 @@
 import numpy as np
-from variana.gaussian import Gaussian, FactorGaussian
+
+from variana import Gaussian, FactorGaussian
 
 
 def test1(dim):
