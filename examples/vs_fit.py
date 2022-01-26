@@ -47,7 +47,7 @@ kernel = FactorGaussian(np.zeros(DIM), np.ones(DIM))
 log_target = lambda x: toy_dist(x, c, s, K=K) - kernel.log(x)
 vs = VariationalSampling(log_target, kernel, ndraws=ndraws)
 #q = vs.fit(vmax=1e6, optimizer='newton', hess_diag_approx=True)
-q, info = vs.fit(family=family, proxy=proxy, vmax=vmax, optimizer=optimizer, output_info=True)
+q, info = vs.fit(family=family, proxy=proxy, vmax=vmax, optimizer=optimizer, overall=True, output_info=True)
 
 print(info)
 print(q)

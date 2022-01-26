@@ -90,10 +90,16 @@ class VariationalSampling(object):
         self._log_fn -= self._log_fmax
         self._fn = np.exp(self._log_fn)
     
-    def fit(self, proxy='discrete_kl', family='factor_gaussian',
-            output_factor=False, vmax=None,
-            optimizer='lbfgs', tol=1e-5, maxiter=None,
-            hess_diag_approx=False, output_info=False):
+    def fit(self,
+            proxy='discrete_kl',
+            family='factor_gaussian',
+            overall=False,
+            vmax=None,
+            optimizer='lbfgs',
+            tol=1e-5,
+            maxiter=None,
+            hess_diag_approx=False,
+            output_info=False):
         """
         Perform fitting.
 
@@ -105,8 +111,10 @@ class VariationalSampling(object):
         family: str
           'factor_gaussian' or 'gaussian'.
 
-        output_factor: bool
-          True if the factor approximation only is to be output.
+        overall: bool
+          False to output the factor approximation only.
+          True to output the overall fit (the factor approximation
+          multiplied by the cavity distribution).
 
         vmax: None or float
           If float, applies a maximum variance constraint to the fit.
@@ -121,14 +129,23 @@ class VariationalSampling(object):
           Only applicable to 'discrete_kl' fitting proxy.
 
         hess_diag_approx: bool
-          Only applicable to 'newton' optimizer.        
+          Only applicable to 'newton' optimizer.
+
         """
         if proxy == 'discrete_kl':
-            self._fit = DiscreteKLFit(self, family, vmax=vmax, output_factor=output_factor, 
-                                      optimizer=optimizer, tol=tol, maxiter=maxiter,
+            self._fit = DiscreteKLFit(self,
+                                      family,
+                                      vmax=vmax,
+                                      overall=overall,
+                                      optimizer=optimizer,
+                                      tol=tol,
+                                      maxiter=maxiter,
                                       hess_diag_approx=hess_diag_approx)
         elif proxy == 'likelihood':
-            self._fit = LikelihoodFit(self, family, vmax=vmax, output_factor=output_factor)
+            self._fit = LikelihoodFit(self,
+                                      family,
+                                      vmax=vmax,
+                                      overall=overall)
         else:
             raise ValueError('unknown proxy')
 
@@ -190,7 +207,7 @@ def laplace_approx(u, g, h, cavity, optimize=True):
 
 class LikelihoodFit(object):
 
-    def __init__(self, sample, family, vmax=None, output_factor=False):
+    def __init__(self, sample, family, vmax=None, overall=False):
         """
         Importance weighted likelihood fitting proxy.
         """
@@ -201,7 +218,7 @@ class LikelihoodFit(object):
         self._vmax = vmax
         if not vmax is None and 'family' == 'gaussian':
             raise NotImplementedError('Second-order constraints not implemented for full Gaussian fitting.')
-        self._output_factor = output_factor
+        self._overall = overall
         
         # Pre-compute some stuff and cache it
         self._family_obj = gaussian_family(self._family, self._dim)
@@ -218,18 +235,24 @@ class LikelihoodFit(object):
             self._full_fit.gate_variance(self._vmax)
             
     def gaussian(self):
-        if self._output_factor:
-            return self._full_fit / self._sample._cavity.normalize()
-        else:
+        if self._overall:
             return self._sample._cavity.Z * self._full_fit
+        else:
+            return self._full_fit / self._sample._cavity.normalize()
             
 
 
 
 class DiscreteKLFit(object):
 
-    def __init__(self, sample, family, vmax=None, output_factor=False,
-                 optimizer='lbfgs', tol=1e-5, maxiter=None,
+    def __init__(self,
+                 sample,
+                 family,
+                 vmax=None,
+                 overall=False,
+                 optimizer='lbfgs',
+                 tol=1e-5,
+                 maxiter=None,
                  hess_diag_approx=False):
         """
         Sampling-based KL divergence minimization.
@@ -249,7 +272,7 @@ class DiscreteKLFit(object):
         self._dim = sample._x.shape[0]
         self._npts = sample._x.shape[1]
         self._family = str(family)
-        self._output_factor = output_factor
+        self._overall = overall
 
         # Pre-compute some stuff and cache it
         self._family_obj = gaussian_family(self._family, self._dim)
@@ -366,21 +389,21 @@ class DiscreteKLFit(object):
         return m.info()
 
     def gaussian(self):
-        if self._output_factor:
-            return self._factor_fit
-        else:
+        if self._overall:
             return self._sample._cavity * self._factor_fit
+        else:
+            return self._factor_fit
     
        
     
 # Helper function
-def dist_fit(log_factor, cavity, factorize=True, ndraws=None, output_factor=False, proxy='discrete_kl', optimizer='lbfgs', vmax=None):
+def dist_fit(log_factor, cavity, factorize=True, ndraws=None, overall=False, proxy='discrete_kl', optimizer='lbfgs', vmax=None):
     vs = VariationalSampling(log_factor, cavity, ndraws=ndraws)
     if factorize:
         family = 'factor_gaussian'
     else:
         family = 'gaussian'
-    return vs.fit(family=family, output_factor=output_factor, proxy=proxy, vmax=vmax, optimizer=optimizer)
+    return vs.fit(family=family, overall=overall, proxy=proxy, vmax=vmax, optimizer=optimizer)
 
 
 
