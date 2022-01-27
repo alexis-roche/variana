@@ -62,11 +62,6 @@ proxy = 'likelihood' if optimizer == 'likelihood'\
     else 'discrete_kl'
     
 
-""" 
-Tune the mean and variance of the cavity distribution. If we use
-as vector as the variance, it will be understood as a diagonal matrix.
-"""
-
 """
 K = 1
 m = np.zeros(DIM)

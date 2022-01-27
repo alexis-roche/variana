@@ -34,7 +34,7 @@ if optimizer == 'likelihood':
     proxy = 'likelihood'
 
 """ 
-Tune the mean and variance of the cavity distribution. If we use
+Tune the mean and variance of the context distribution. If we use
 as vector as the variance, it will be understood as a diagonal matrix.
 """
 K = np.random.rand()

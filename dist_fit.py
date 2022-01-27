@@ -24,7 +24,7 @@ def vectorize(f, x):
 
 class VariationalSampling(object):
 
-    def __init__(self, log_factor, cavity, rule='balanced', ndraws=None, reflect=False):
+    def __init__(self, log_factor, context, rule='balanced', ndraws=None, reflect=False):
         """Variational sampling class.
 
         Fit a target factor with a Gaussian distribution by maximizing
@@ -36,7 +36,7 @@ class VariationalSampling(object):
         log_factor: callable
           returns the log of the target factor (utility)
 
-        cavity: tuple
+        context: tuple
           a tuple `(m, V)` where `m` is a vector representing the mean
           of the sampling distribution and `V` is a matrix or vector
           representing the variance. If a vector, a diagonal variance
@@ -47,13 +47,13 @@ class VariationalSampling(object):
           random sample size
 
         reflect: bool
-          if True, reflect the sample about the cavity mean
+          if True, reflect the sample about the context mean
 
         rule: str
           Defines the underlying one-dimensional quadrature precision-3 rule
           One of 'balanced' or 'optimal_d4', 'exact_d3_uniform', 'exact_d3_positive'
         """
-        self._cavity = as_gaussian(cavity)
+        self._context = as_gaussian(context)
         self._log_factor = log_factor
         self._rule = rule
         self._ndraws = ndraws
@@ -66,16 +66,16 @@ class VariationalSampling(object):
     @probe_time
     def _sample(self):
         """
-        Sample independent points from the specified cavity and
+        Sample independent points from the specified context and
         compute associated distribution values.
         """
         if self._ndraws is None:
-            self._x, self._w = self._cavity.quad3(self._rule)
+            self._x, self._w = self._context.quad3(self._rule)
             self._reflect = True
         else:
-            self._x = self._cavity.random(ndraws=self._ndraws)
+            self._x = self._context.random(ndraws=self._ndraws)
             if self._reflect:
-                self._x = reflect_sample(self._x, self._cavity.m)
+                self._x = reflect_sample(self._x, self._context.m)
             self._w = np.zeros(self._x.shape[1])
             self._w[:] = 1 / float(self._x.shape[1])
         # For numerical stability, we normalize the factor values by
@@ -114,7 +114,7 @@ class VariationalSampling(object):
         overall: bool
           False to output the factor approximation only.
           True to output the overall fit (the factor approximation
-          multiplied by the cavity distribution).
+          multiplied by the context distribution).
 
         vmax: None or float
           If float, applies a maximum variance constraint to the fit.
@@ -183,18 +183,18 @@ def prod_factors(f):
     return out
 
 
-def laplace_approx(u, g, h, cavity, optimize=True):
+def laplace_approx(u, g, h, context, optimize=True):
     """
     u: loss function -> factor f = exp(-u)
     g: gradient of u 
     h: Hessian of u
-    cavity: cavity distribution
+    context: context distribution
     """
-    m = cavity.m
+    m = context.m
     if optimize:
-        f = lambda x: u(x) - cavity.log(x.reshape((-1, 1)))
-        fprime = lambda x: g(x) + (x - cavity.m) / cavity.v
-        fhess_p = lambda x, p: (h(x) + (1 / cavity.v)) * p
+        f = lambda x: u(x) - context.log(x.reshape((-1, 1)))
+        fprime = lambda x: g(x) + (x - context.m) / context.v
+        fhess_p = lambda x, p: (h(x) + (1 / context.v)) * p
         m = fmin_ncg(f, m, fprime, fhess_p=fhess_p, disp=0)
     return laplace_approximation(m, u(m), g(m), h(m))
 
@@ -236,9 +236,9 @@ class LikelihoodFit(object):
             
     def gaussian(self):
         if self._overall:
-            return self._sample._cavity.Z * self._full_fit
+            return self._sample._context.Z * self._full_fit
         else:
-            return self._full_fit / self._sample._cavity.normalize()
+            return self._full_fit / self._sample._context.normalize()
             
 
 
@@ -372,7 +372,7 @@ class DiscreteKLFit(object):
         bounds = None
         if not self._vmax is None:
             if self._family == 'factor_gaussian':
-                theta2_max = -.5 / self._vmax - self._sample._cavity.theta[(self._dim + 1):]
+                theta2_max = -.5 / self._vmax - self._sample._context.theta[(self._dim + 1):]
                 bounds = [(None, None) for i in range(self._dim + 1)]
                 bounds += [(None, theta2_max[i]) for i in range(self._dim)]
 
@@ -390,15 +390,15 @@ class DiscreteKLFit(object):
 
     def gaussian(self):
         if self._overall:
-            return self._sample._cavity * self._factor_fit
+            return self._sample._context * self._factor_fit
         else:
             return self._factor_fit
     
        
     
 # Helper function
-def dist_fit(log_factor, cavity, factorize=True, ndraws=None, overall=False, proxy='discrete_kl', optimizer='lbfgs', vmax=None):
-    vs = VariationalSampling(log_factor, cavity, ndraws=ndraws)
+def dist_fit(log_factor, context, factorize=True, ndraws=None, overall=False, proxy='discrete_kl', optimizer='lbfgs', vmax=None):
+    vs = VariationalSampling(log_factor, context, ndraws=ndraws)
     if factorize:
         family = 'factor_gaussian'
     else:
@@ -439,7 +439,7 @@ class StarApproximation(object):
         loc_dim = i1 - i0
         full_dim = (i0 == 0) and (i1 == self._fit.dim)
 
-        # Define local cavity from the current fit
+        # Define local context from the current fit
         if full_dim:
             loc_theta = self._fit.theta
             init_loc_fit = self._fit
@@ -697,9 +697,9 @@ class OnlineIProj(object):
 
 class OnlineContextFit(OnlineIProj):
 
-    def __init__(self, log_factor, cavity, gamma, vmax=1e5, vmin=1e-10, proxy='discrete_kl'):
-        self._cavity = as_gaussian(cavity)
-        self._gen_init(log_factor, self._cavity.copy(), vmax, vmin)
+    def __init__(self, log_factor, context, gamma, vmax=1e5, vmin=1e-10, proxy='discrete_kl'):
+        self._context = as_gaussian(context)
+        self._gen_init(log_factor, self._context.copy(), vmax, vmin)
         self._log_factor = log_factor
         self._log_target = None
         if proxy == 'likelihood':
@@ -709,13 +709,13 @@ class OnlineContextFit(OnlineIProj):
         self.reset(gamma)
 
     def sample(self):
-        return np.sqrt(self._cavity.v) * np.random.normal(size=self._dim) + self._cavity.m        
+        return np.sqrt(self._context.v) * np.random.normal(size=self._dim) + self._context.m        
 
     def log_fitted_factor(self, x):
-        return self.log(x) + .5 * mahalanobis(x, self._cavity.m, self._cavity.v)
+        return self.log(x) + .5 * mahalanobis(x, self._context.m, self._context.v)
 
     def log_rho(self):
-        return logZ(0, self._cavity.v) - logZ(self._logK, self._v)
+        return logZ(0, self._context.v) - logZ(self._logK, self._v)
 
     def epsilon(self, x):
         return safe_diff_exp(self._log_factor(x), self.log_fitted_factor(x), self.log_rho())
@@ -726,7 +726,7 @@ class OnlineContextFit(OnlineIProj):
         return f
 
     def factor_fit(self):
-        g = FactorGaussian(self._m, self._v, logK=self._logK) / FactorGaussian(self._cavity.m, self._cavity.v, logK=0)
+        g = FactorGaussian(self._m, self._v, logK=self._logK) / FactorGaussian(self._context.m, self._context.v, logK=0)
         return g
 
     def stepsisze(self):
