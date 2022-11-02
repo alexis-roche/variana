@@ -34,13 +34,14 @@ class VariationalSampling(object):
         Parameters
         ----------
         log_factor: callable
-          returns the log of the target factor (utility)
+          Should take an array of shape (dim, n) as input and returns
+          the log of the target factor as an array of shape (dim,)
 
-        context: tuple
-          a tuple `(m, V)` where `m` is a vector representing the mean
+        context: tuple or Gaussian or FactorGaussian instance
+          If a tuple, `(m, V)` where `m` is a vector representing the mean
           of the sampling distribution and `V` is a matrix or vector
-          representing the variance. If a vector, a diagonal variance
-          is assumed.
+          representing the variance (in which case a diagonal variance
+          is assumed).
 
         ndraws: None or int
           if None, a precision 3 quadrature rule is used. If int,
