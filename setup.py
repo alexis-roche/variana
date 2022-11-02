@@ -3,17 +3,20 @@ version = '0.1dev'
 
 from numpy.distutils.misc_util import Configuration
 from numpy.distutils.core import setup
+from Cython.Build import cythonize
 
 
 def configuration(parent_package='', top_path=None):
-    config = Configuration(None, parent_package, top_path)
-    config.set_options(
-        ignore_setup_xxx_py=True,
-        assume_default_configuration=True,
-        delegate_options_to_subpackages=True,
-        quiet=True,
-    )
-    config.add_subpackage('variana')
+    config = Configuration('variana', parent_package, top_path)
+    #config.set_options(
+    #    ignore_setup_xxx_py=True,
+    #    assume_default_configuration=True,
+    #    delegate_options_to_subpackages=True,
+    #    quiet=True,
+    #)
+    config.add_data_dir('tests')
+    cythonize('_utils.pyx')
+    config.add_extension('_utils', sources=['_utils.c'])   
     return config
 
 
