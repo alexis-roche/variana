@@ -9,6 +9,7 @@ from .utils import TINY
 
 
 GAUSS_CONSTANT = .5 * np.log(2 * np.pi)
+SQRT_TWO = np.sqrt(2)
 
 
 def force_tiny(x):
@@ -515,7 +516,17 @@ class FactorGaussian(Gaussian):
 
     def gate_variance(self, vmax):
         self._theta[(self._dim + 1):] = np.minimum(self._theta[(self._dim + 1):], -.5 / vmax)
-        
+
+    def orthonormal_basis(self, x):
+        """
+        Return basis function values at `x`. The basis is orthonormal wrt the dot product:
+        <f, g> = \int q f g
+        where q is our factor Gaussian distribution.
+        """
+        phi1 = (x - self._m) / np.sqrt(self._v)
+        phi2 = (phi1 ** 2 - 1) / SQRT_TWO
+        return np.append(1, np.concatenate((phi1, phi2))) / np.sqrt(self.Z)
+
 
 class FactorGaussianFamily(GaussianFamily):
 
