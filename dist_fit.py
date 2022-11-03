@@ -177,12 +177,6 @@ class VariationalSampling(object):
 
 
     
-def prod_factors(f):
-    out = f[0]
-    for i in range(1, len(f)):
-        out *= f[i]
-    return out
-
 
 def laplace_approx(u, g, h, context, optimize=True):
     """
