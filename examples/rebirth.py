@@ -84,3 +84,20 @@ print('Order-0 error = %f' % rel_err(f.K, g.K))
 print('Order-1 error = %f' % rel_err(f.m, g.m))
 print('Order-2 error = %f' % rel_err(f.v, g.v))
 
+####################################################
+# CUSTOM OPTIMIZER
+####################################################
+SQRT_TWO = np.sqrt(2)
+vs2 = VariationalSampling(f.log, pi, ndraws=ndraws)
+
+# Iteration
+vs2._sample()
+
+q = FactorGaussian(np.zeros(DIM), np.ones(DIM))
+
+x = vs2._x[
+
+phi1 = (x - q._m[:, None]) / np.sqrt(q._v[:, None])
+phi2 = (phi1 ** 2 - 1) / SQRT_TWO
+
+zob = np.vstack((np.ones(x.shape[1]), phi1, phi2)) / np.sqrt(q.Z)
