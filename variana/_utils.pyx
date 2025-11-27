@@ -10,7 +10,7 @@ cimport cython
 cdef set_offsets(size_t* off, np.ndarray x, unsigned int bytesize):
     cdef unsigned int i
     for i in range(x.ndim):
-        off[i] = x.strides[i] / bytesize
+        off[i] = x.strides[i] // bytesize
 
     
 @cython.boundscheck(False)

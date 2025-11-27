@@ -4,12 +4,7 @@ import numpy as np
 
 from ..gaussian import *
 
-from nose.tools import (assert_true, 
-                        assert_false, 
-                        assert_raises)
-from numpy.testing import (assert_array_equal, 
-                           assert_array_almost_equal,
-                           assert_almost_equal)
+from numpy.testing import assert_array_equal
 
 
 SQRT_TWO_PI = np.sqrt(2 * np.pi)
@@ -23,12 +18,12 @@ def _test_init_gaussian(g, dim, Z=1, m=None, v=None, V=None, factor_gaussian=Fal
         v = np.ones(dim)
     if V is None:
         V = np.eye(dim)
-    assert_true(g.dim == dim)
-    assert_true(g.m.shape == (dim,))
+    assert g.dim == dim
+    assert g.m.shape == (dim,)
     if factor_gaussian:
-        assert_true(g.v.shape == (dim,))
-    assert_true(g.V.shape == (dim, dim))
-    assert_true((abs(g.Z - Z) / Z) < 1e-10)
+        assert g.v.shape == (dim,)
+    assert g.V.shape == (dim, dim)
+    assert (abs(g.Z - Z) / Z) < 1e-10
     assert_array_equal(g.m, m)
     if factor_gaussian:
         assert_array_equal(g.v, v)
@@ -89,9 +84,9 @@ def _test_evaluate_normalized_gaussian(dim):
     y = g(x)
     xs = np.random.random((dim, 10))
     ys = g(xs)
-    assert_true(isinstance(y, float))
-    assert_true(y == gf(x))
-    assert_true(ys.shape == (10,))
+    assert isinstance(y, float)
+    assert y == gf(x)
+    assert ys.shape == (10,)
     assert_array_equal(ys, gf(xs))
     
 

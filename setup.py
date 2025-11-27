@@ -1,38 +1,28 @@
 #!/usr/bin/env python
-version = '0.1dev'
 
-from numpy.distutils.misc_util import Configuration
-from numpy.distutils.core import setup
+from setuptools import setup, Extension, find_packages
 from Cython.Build import cythonize
+import numpy as np
 
+version = "0.1dev"
 
-def configuration(parent_package='', top_path=None):
-    config = Configuration('variana', parent_package, top_path)
-    #config.set_options(
-    #    ignore_setup_xxx_py=True,
-    #    assume_default_configuration=True,
-    #    delegate_options_to_subpackages=True,
-    #    quiet=True,
-    #)
-    config.add_data_dir('tests')
-    cythonize('_utils.pyx')
-    config.add_extension('_utils', sources=['_utils.c'])   
-    return config
-
-
-def setup_package():
-    setup(
-        configuration=configuration,
-        name='variana',
-        version=version,
-        maintainer='Alexis Roche',
-        maintainer_email='alexis.roche@gmail.com',
-        description='Gaussian probability distribution approximation via variational sampling',
-        url='http://www.scipy.org',
-        license='BSD',
-        #install_requires=['numpy >= 1.0.2',],
+extensions = [
+    Extension(
+        name="variana._utils",
+        sources=["variana/_utils.pyx"],
+        include_dirs=[np.get_include()],
     )
-    return
+]
 
-if __name__ == '__main__':
-    setup_package()
+setup(
+    name="variana",
+    version=version,
+    maintainer="Alexis Roche",
+    maintainer_email="alexis.roche@gmail.com",
+    description="Gaussian probability distribution approximation via variational sampling",
+    url="http://www.scipy.org",
+    license="BSD",
+    packages=find_packages(),
+    package_data={"variana": ["tests/*"]},
+    ext_modules=cythonize(extensions, language_level="3"),
+)
